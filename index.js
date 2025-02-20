@@ -217,9 +217,9 @@ app.post("/api/register", async (req, res) => {
           <h3>📌 Stay Connected:</h3>
           <p>Follow us for updates and behind-the-scenes content:</p>
           <p>
-            🔗 <a href="https://www.linkedin.com/company/yourcompany" target="_blank">LinkedIn</a> | 
-            📸 <a href="https://www.instagram.com/yourcompany" target="_blank">Instagram</a> | 
-            💬 <a href="https://wa.me/yourwhatsappnumber" target="_blank">WhatsApp</a>
+            🔗 <a href="https://www.linkedin.com/company/yellowmatics" target="_blank">LinkedIn</a> | 
+            📸 <a href="https://www.instagram.com/yellowmatics.ai/" target="_blank">Instagram</a> | 
+            💬 <a href="https://bit.ly/YMWhatsapp" target="_blank">WhatsApp</a>
           </p>
   
           <p>If you have any questions, feel free to reply to this email. We can't wait to see you at the event! 🎊</p>
