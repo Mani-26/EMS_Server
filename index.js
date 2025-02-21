@@ -44,15 +44,143 @@ const Registration = mongoose.model(
     attended: { type: Boolean, default: false },
   })
 );
+const Admin = mongoose.model(
+  "Admin",
+  new mongoose.Schema({
+    name: String,
+    email: { type: String, unique: true },
+    password: String,
+  })
+);
+const bcrypt = require("bcryptjs");
+
+// Admin Registration (Only for first-time setup)
+app.post("/api/admin/register", async (req, res) => {
+  const { name, email, password } = req.body;
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ message: "All fields are required!" });
+  }
+
+  try {
+    const existingAdmin = await Admin.findOne({ email });
+    if (existingAdmin) {
+      return res.status(400).json({ message: "Admin already exists!" });
+    }
+
+    // Hash the password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Save admin to DB
+    const newAdmin = new Admin({ name, email, password: hashedPassword });
+    await newAdmin.save();
+
+    res.status(201).json({ message: "Admin registered successfully!" });
+  } catch (error) {
+    res.status(500).json({ message: "Error creating admin", error });
+  }
+});
+
+const jwt = require("jsonwebtoken");
+
+// Admin Login
+app.post("/api/admin/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const admin = await Admin.findOne({ email });
+    if (!admin) return res.status(400).json({ message: "Invalid credentials" });
+
+    const isMatch = await bcrypt.compare(password, admin.password);
+    if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { adminId: admin._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" } // Token expires in 1 hour
+    );
+
+    res.json({ message: "Login successful", token });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error });
+  }
+});
+
+// const authMiddleware = (req, res, next) => {
+//   const token = req.header("Authorization");
+
+//   if (!token) {
+//     return res.status(401).json({ message: "Access Denied! No token provided." });
+//   }
+
+//   try {
+//     const verified = jwt.verify(token.replace("Bearer ", ""), process.env.JWT_SECRET);
+//     req.admin = verified;
+//     next();
+//   } catch (error) {
+//     res.status(403).json({ message: "Invalid Token" });
+//   }
+// };
+
+
 
 // Get all events
+
+const ExcelJS = require("exceljs");
+
+// Download user details as an Excel file
+app.get("/api/events/:eventId/download", async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json({ message: "Event not found" });
+
+    const registrations = await Registration.find({ eventId }).select("name email");
+
+    // Create a new Excel workbook and sheet
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet(event.name);
+
+    // Add headers
+    worksheet.columns = [
+      { header: "Name", key: "name", width: 30 },
+      { header: "Email", key: "email", width: 30 },
+    ];
+
+    // Add data
+    registrations.forEach((user) => {
+      worksheet.addRow({ name: user.name, email: user.email });
+    });
+
+    // Set response headers for file download
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=${event.name}_Registrations.xlsx`
+    );
+
+    // Send the Excel file as a response
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Error generating Excel:", error);
+    res.status(500).json({ message: "Failed to generate Excel file" });
+  }
+});
+
+
 app.get("/api/events", async (req, res) => {
   const events = await Event.find();
   res.json(events);
 });
 
 // Create a new event (Admin Only)
-app.post("/api/events", async (req, res) => {
+app.post("/api/events",  async (req, res) => {
   const { name, date, description, seatLimit } = req.body;
 
   if (!name || !date || !description || !seatLimit) {
@@ -91,7 +219,7 @@ app.get("/api/events/:eventId", async (req, res) => {
   }
 });
 
-app.put("/api/events/:id", async (req, res) => {
+app.put("/api/events/:id",  async (req, res) => {
   const { id } = req.params;
   const { name, date, description, seatLimit } = req.body;
 
@@ -129,7 +257,7 @@ app.put("/api/events/:id", async (req, res) => {
 });
 
 // DELETE an event
-app.delete("/api/events/:id", async (req, res) => {
+app.delete("/api/events/:id",  async (req, res) => {
   try {
     const event = await Event.findByIdAndDelete(req.params.id);
     if (!event) {
@@ -148,6 +276,7 @@ app.post("/api/register", async (req, res) => {
     let event = await Event.findById(eventId);
     if (!event) return res.status(404).json({ message: "Event not found" });
     let remainingSeats=event.seatLimit-event.registeredUsers;
+    
     // Check seat availability
     if (remainingSeats <= 0) {
       return res.status(400).json({ message: "❌ Event is fully booked!" });
@@ -253,7 +382,7 @@ app.post("/api/register", async (req, res) => {
 });
 
 // Get all registrations for a specific event
-app.get("/api/events/:eventId/registrations", async (req, res) => {
+app.get("/api/events/:eventId/registrations",  async (req, res) => {
   try {
     const { eventId } = req.params;
     const registrations = await Registration.find({ eventId }).select("name email");
