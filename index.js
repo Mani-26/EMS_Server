@@ -9,7 +9,7 @@ const bodyParser = require("body-parser");
 
 const app = express();
 app.use(cors());
-app.use(cors({ origin: 'https://yellowmatics-events.vercel.app' }));
+app.use(cors({ origin: '*' }));
 
 app.use(express.json());
 app.use(bodyParser.json());
