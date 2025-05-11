@@ -563,17 +563,26 @@ app.get("/api/events/:eventId/download", async (req, res) => {
     // Get filename from query param or generate default
     const filename = req.query.filename || `${event.name.replace(/[^a-zA-Z0-9]/g, '_')}_Registrations.xlsx`;
     
-    // Set response headers for file download
+    // Check if this is a direct browser request (has user agent) vs programmatic request
+    const userAgent = req.headers['user-agent'] || '';
+    const isMobileUserAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+    const isDirectAccess = req.query.direct === 'true' || (isMobileUserAgent && req.headers['sec-fetch-dest'] !== 'empty');
+    
+    // Set content type for Excel files
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
+    
+    // Set appropriate content disposition based on access type
+    // For direct browser access on mobile, use 'inline' to open in browser
+    // For programmatic or desktop access, use 'attachment' to download
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=${filename}`
+      `${isDirectAccess ? 'inline' : 'attachment'}; filename=${filename}`
     );
     
-    // Add headers to prevent caching issues in mobile WebViews
+    // Add headers to prevent caching issues
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
@@ -581,7 +590,10 @@ app.get("/api/events/:eventId/download", async (req, res) => {
     // Add CORS headers to ensure it works across different domains
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-
+    
+    // Add headers to improve mobile browser compatibility
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    
     // Send the Excel file as a response
     await workbook.xlsx.write(res);
     res.end();
