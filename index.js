@@ -10,7 +10,7 @@ const bodyParser = require("body-parser");
 const app = express();
 app.use(cors({ 
   
-  origin: ["http://localhost:3000", "https://emsserver2-production.up.railway.app"], 
+  origin: ["http://localhost:3000", "https://emsserver2-production.up.railway.app","https://yellowmatics-events.vercel.app"], 
   credentials: true 
 
 }));
