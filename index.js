@@ -560,6 +560,9 @@ app.get("/api/events/:eventId/download", async (req, res) => {
       worksheet.getCell(`D${lastRow}`).value = `Completed: ${completedPayments} | Pending: ${pendingPayments}`;
     }
     
+    // Get filename from query param or generate default
+    const filename = req.query.filename || `${event.name.replace(/[^a-zA-Z0-9]/g, '_')}_Registrations.xlsx`;
+    
     // Set response headers for file download
     res.setHeader(
       "Content-Type",
@@ -567,8 +570,17 @@ app.get("/api/events/:eventId/download", async (req, res) => {
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=${event.name.replace(/[^a-zA-Z0-9]/g, '_')}_Registrations.xlsx`
+      `attachment; filename=${filename}`
     );
+    
+    // Add headers to prevent caching issues in mobile WebViews
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    
+    // Add CORS headers to ensure it works across different domains
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
 
     // Send the Excel file as a response
     await workbook.xlsx.write(res);
