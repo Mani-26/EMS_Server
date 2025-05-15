@@ -244,6 +244,10 @@ router.post("/verify-payment", async (req, res) => {
 
     const emailContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <img src="https://yellowmatics.ai/wp-content/uploads/2023/09/yellowmatics-logo.png" alt="Yellowmatics Logo" style="max-width: 200px;">
+        </div>
+        
         <h1 style="color: #FFA500; text-align: center;">🔄 Payment Verification in Progress</h1>
         
         <p>Hello ${registration.name},</p>
@@ -253,19 +257,22 @@ router.post("/verify-payment", async (req, res) => {
         <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
           <h2 style="color: #333; margin-top: 0;">🎟️ Registration Details</h2>
           <ul style="list-style-type: none; padding-left: 0;">
-            <li><strong>🎫 Ticket ID:</strong> #${registration.ticketId}</li>
-            <li><strong>📌 Event Name:</strong> ${event.name}</li>
-            <li><strong>📅 Date:</strong> ${new Date(event.date).toLocaleDateString()}</li>
-            <li><strong>📍 Venue:</strong> ${event.venue}</li>
-            <li><strong>💰 Fee:</strong> ₹${event.fee}</li>
-            <li><strong>💳 Payment Reference:</strong> ${registration.paymentId}</li>
+            <li style="margin-bottom: 8px;"><strong>🎫 Ticket ID:</strong> #${registration.ticketId}</li>
+            <li style="margin-bottom: 8px;"><strong>📌 Event Name:</strong> ${event.name}</li>
+            <li style="margin-bottom: 8px;"><strong>📅 Date:</strong> ${new Date(event.date).toLocaleDateString('en-US', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'})}</li>
+            <li style="margin-bottom: 8px;"><strong>📍 Venue:</strong> ${event.venue}</li>
+            <li style="margin-bottom: 8px;"><strong>💰 Fee:</strong> ₹${event.fee}</li>
+            <li style="margin-bottom: 8px;"><strong>💳 Payment Reference:</strong> ${registration.paymentId}</li>
+            <li style="margin-bottom: 8px;"><strong>📱 Phone:</strong> ${registration.phone || 'N/A'}</li>
+            <li style="margin-bottom: 8px;"><strong>📆 Registration Date:</strong> ${new Date(registration.registrationDate).toLocaleString('en-US', {dateStyle: 'full', timeStyle: 'short'})}</li>
           </ul>
         </div>
 
         <div style="background-color: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ffc107;">
           <h3 style="color: #856404; margin-top: 0;">⚠️ Important Information</h3>
-          <p style="margin-bottom: 0;">Your payment is currently being verified by our team. Once verified, you will receive your official ticket via email.</p>
-          <p style="margin-bottom: 0;">Please keep your Ticket ID handy for any communication regarding your registration.</p>
+          <p style="margin-bottom: 8px;">Your payment is currently being verified by our team. Once verified, you will receive your official ticket via email.</p>
+          <p style="margin-bottom: 8px;">Please keep your Ticket ID <strong>#${registration.ticketId}</strong> handy for any communication regarding your registration.</p>
+          <p style="margin-bottom: 0;">Verification usually takes 1-2 business days. Thank you for your patience.</p>
         </div>
 
         <div style="background-color: #d4edda; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #28a745;">
@@ -276,9 +283,17 @@ router.post("/verify-payment", async (req, res) => {
           </p>
         </div>
 
-        <p>If you have any questions, feel free to reply to this email or contact our support team.</p>
+        <p>If you have any questions, feel free to reply to this email or contact our support team at <a href="mailto:events@yellowmatics.ai">events@yellowmatics.ai</a>.</p>
 
-        <p style="text-align: center; font-weight: bold;">Thank you for your patience! 🙏</p>
+        <div style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
+          <p style="text-align: center; color: #666; font-size: 14px;">Connect with us</p>
+          <div style="text-align: center; margin-bottom: 15px;">
+            <a href="https://www.linkedin.com/company/yellowmatics" style="text-decoration: none; margin: 0 10px; color: #0077B5;">LinkedIn</a> | 
+            <a href="https://www.instagram.com/yellowmatics.ai/" style="text-decoration: none; margin: 0 10px; color: #E1306C;">Instagram</a> | 
+            <a href="https://bit.ly/YMWhatsapp" style="text-decoration: none; margin: 0 10px; color: #25D366;">WhatsApp</a>
+          </div>
+          <p style="text-align: center; color: #666; font-size: 12px;">© ${new Date().getFullYear()} Yellowmatics. All rights reserved.</p>
+        </div>
       </div>
     `;
 

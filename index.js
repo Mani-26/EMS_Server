@@ -305,29 +305,73 @@ app.post("/api/admin/verify-payment", async (req, res) => {
         
         const emailContent = `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+            <div style="text-align: center; margin-bottom: 20px;">
+              <img src="https://yellowmatics.ai/wp-content/uploads/2023/09/yellowmatics-logo.png" alt="Yellowmatics Logo" style="max-width: 200px;">
+            </div>
+            
             <h1 style="color: #4CAF50; text-align: center;">🎉 Payment Verified - Registration Confirmed!</h1>
             
             <p>Hello ${registration.name},</p>
             
             <p>Great news! Your payment for <strong>${event.name}</strong> has been verified and your registration is now confirmed.</p>
             
+            <div style="text-align: center; margin: 30px 0;">
+              <div style="border: 2px dashed #4CAF50; padding: 20px; border-radius: 10px; background-color: #f9f9f9; display: inline-block;">
+                <h2 style="color: #333; margin-top: 0; text-align: center;">🎟️ Your Event Ticket</h2>
+                <div style="text-align: center; margin: 20px 0;">
+                  <img src="cid:ticketQR" alt="Event Ticket QR Code" style="max-width: 200px; border: 1px solid #ddd; padding: 10px; background: white;">
+                </div>
+                <p style="text-align: center; font-weight: bold; margin: 5px 0; font-size: 18px;">Ticket ID: #${registration.ticketId}</p>
+                <p style="text-align: center; margin: 5px 0;">${registration.name}</p>
+              </div>
+            </div>
+            
             <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
-              <h2 style="color: #333; margin-top: 0;">🎟️ Ticket Details</h2>
+              <h2 style="color: #333; margin-top: 0;">📋 Event Details</h2>
               <ul style="list-style-type: none; padding-left: 0;">
-                <li><strong>🎫 Ticket ID:</strong> #${registration.ticketId}</li>
-                <li><strong>📌 Event Name:</strong> ${event.name}</li>
-                <li><strong>📅 Event Date:</strong> ${new Date(event.date).toLocaleDateString()}</li>
-                <li><strong>📝 Description:</strong> ${event.description || 'N/A'}</li>
-                <li><strong>📍 Venue:</strong> ${event.venue}</li>
-                <li><strong>💰 Fee:</strong> ₹${event.fee}</li>
-                <li><strong>💳 Payment Reference:</strong> ${registration.paymentId}</li>
-                <li><strong>📆 Registration Date:</strong> ${registration.registrationDate ? new Date(registration.registrationDate).toLocaleString() : 'N/A'}</li>
+                <li style="margin-bottom: 8px;"><strong>📌 Event Name:</strong> ${event.name}</li>
+                <li style="margin-bottom: 8px;"><strong>📅 Event Date:</strong> ${new Date(event.date).toLocaleDateString('en-US', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'})}</li>
+                <li style="margin-bottom: 8px;"><strong>📝 Description:</strong> ${event.description || 'N/A'}</li>
+                <li style="margin-bottom: 8px;"><strong>📍 Venue:</strong> ${event.venue}</li>
               </ul>
-            </div>a
-            <p>Attached below is your unique event ticket (QR Code). Please bring it with you for entry.</p>
-            <p>If you have any questions, feel free to reply to this email. We can't wait to see you at the event! 🎊</p>
+            </div>
+            
+            <div style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #4CAF50;">
+              <h3 style="color: #2e7d32; margin-top: 0;">✅ Registration Information</h3>
+              <ul style="list-style-type: none; padding-left: 0;">
+                <li style="margin-bottom: 8px;"><strong>🎫 Ticket ID:</strong> #${registration.ticketId}</li>
+                <li style="margin-bottom: 8px;"><strong>👤 Name:</strong> ${registration.name}</li>
+                <li style="margin-bottom: 8px;"><strong>📧 Email:</strong> ${registration.email}</li>
+                <li style="margin-bottom: 8px;"><strong>📱 Phone:</strong> ${registration.phone || 'N/A'}</li>
+                <li style="margin-bottom: 8px;"><strong>💰 Fee:</strong> ₹${event.fee}</li>
+                <li style="margin-bottom: 8px;"><strong>💳 Payment Reference:</strong> ${registration.paymentId}</li>
+                <li style="margin-bottom: 8px;"><strong>📆 Registration Date:</strong> ${registration.registrationDate ? new Date(registration.registrationDate).toLocaleString('en-US', {dateStyle: 'full', timeStyle: 'short'}) : 'N/A'}</li>
+              </ul>
+            </div>
+            
+            <div style="background-color: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ffc107;">
+              <h3 style="color: #856404; margin-top: 0;">⚠️ Important Information</h3>
+              <ul style="padding-left: 20px;">
+                <li style="margin-bottom: 8px;">Please bring this ticket (QR code) with you to the event for entry.</li>
+                <li style="margin-bottom: 8px;">You can either print this email or show the QR code on your mobile device.</li>
+                <li style="margin-bottom: 8px;">Please arrive at least 15 minutes before the event starts.</li>
+                <li style="margin-bottom: 8px;">This ticket is unique to you and cannot be transferred to others.</li>
+              </ul>
+            </div>
+            
+            <p>If you have any questions, feel free to reply to this email or contact our support team at <a href="mailto:events@yellowmatics.ai">events@yellowmatics.ai</a>.</p>
 
-            <p style="text-align: center; font-weight: bold;">🚀 See you soon! 🚀</p>
+            <p style="text-align: center; font-weight: bold; font-size: 18px; margin-top: 30px;">🚀 We can't wait to see you at the event! 🚀</p>
+            
+            <div style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
+              <p style="text-align: center; color: #666; font-size: 14px;">Connect with us</p>
+              <div style="text-align: center; margin-bottom: 15px;">
+                <a href="https://www.linkedin.com/company/yellowmatics" style="text-decoration: none; margin: 0 10px; color: #0077B5;">LinkedIn</a> | 
+                <a href="https://www.instagram.com/yellowmatics.ai/" style="text-decoration: none; margin: 0 10px; color: #E1306C;">Instagram</a> | 
+                <a href="https://bit.ly/YMWhatsapp" style="text-decoration: none; margin: 0 10px; color: #25D366;">WhatsApp</a>
+              </div>
+              <p style="text-align: center; color: #666; font-size: 12px;">© ${new Date().getFullYear()} Yellowmatics. All rights reserved.</p>
+            </div>
           </div>
         `;
 
@@ -341,7 +385,14 @@ app.post("/api/admin/verify-payment", async (req, res) => {
               filename: "ticket.png",
               content: registration.ticket.split(";base64,").pop(),
               encoding: "base64",
+              cid: "ticketQR" // Content ID referenced in the HTML
             },
+            // Also attach the ticket as a regular attachment so they can download it
+            {
+              filename: `Yellowmatics_Ticket_${registration.ticketId}.png`,
+              content: registration.ticket.split(";base64,").pop(),
+              encoding: "base64"
+            }
           ],
         };
 
