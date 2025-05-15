@@ -39,6 +39,13 @@ const Event = mongoose.model(
     registeredUsers: { type: Number, default: 0 }, // Tracks how many users registered
     isFree: { type: Boolean, default: true }, // Whether the event is free or paid
     fee: { type: Number, default: 0 }, // Fee amount in INR (if paid)
+    customFields: [{ 
+      fieldName: String,
+      fieldType: { type: String, enum: ['text', 'email', 'number', 'date', 'select', 'checkbox'], default: 'text' },
+      isRequired: { type: Boolean, default: false },
+      options: [String], // For select fields
+      placeholder: String
+    }]
   })
 );
 
@@ -60,7 +67,8 @@ const Registration = mongoose.model(
     paymentVerified: { type: Boolean, default: false }, // Flag to indicate if payment has been manually verified
     verificationDate: Date, // Date when payment was verified
     verifiedBy: String, // Admin who verified the payment
-    registrationDate: { type: Date, default: Date.now } // When the user registered for the event
+    registrationDate: { type: Date, default: Date.now }, // When the user registered for the event
+    customFieldValues: { type: Map, of: mongoose.Schema.Types.Mixed } // Store custom field values as key-value pairs with mixed types
   })
 );
 
@@ -196,7 +204,7 @@ app.get("/api/events/:eventId/registrations", async (req, res) => {
     const event = await Event.findById(eventId);
     if (!event) return res.status(404).json({ message: "Event not found" });
 
-    const registrations = await Registration.find({ eventId }).select("name email phone paymentStatus paymentId transactionId paymentScreenshot paymentVerified ticketId verificationDate registrationDate");
+    const registrations = await Registration.find({ eventId }).select("name email phone paymentStatus paymentId transactionId paymentScreenshot paymentVerified ticketId verificationDate registrationDate customFieldValues");
     
     res.json(registrations);
   } catch (error) {
@@ -389,6 +397,7 @@ app.post("/api/test/create-pending-registration", async (req, res) => {
       paymentId: transactionRef,
       paymentMethod: 'upi',
       paymentScreenshot: 'https://res.cloudinary.com/demo/image/upload/v1312461204/sample.jpg', // Sample image
+      customFieldValues: {} // Empty custom fields for test registration
     });
     
     await registration.save();
@@ -611,7 +620,10 @@ app.get("/api/events", async (req, res) => {
 
 // Create a new event (Admin Only)
 app.post("/api/events",  async (req, res) => {
-  const { name, date, description, venue, seatLimit, isFree, fee } = req.body;
+  console.log("Creating event with data:", req.body);
+  console.log("Custom fields received:", req.body.customFields);
+  
+  const { name, date, description, venue, seatLimit, isFree, fee, customFields } = req.body;
 
   if (!name || !date || !description || !venue || !seatLimit) {
     return res.status(400).json({ message: "All fields are required" });
@@ -623,6 +635,36 @@ app.post("/api/events",  async (req, res) => {
   }
 
   try {
+    // Validate custom fields
+    let validatedCustomFields = [];
+    if (customFields && Array.isArray(customFields)) {
+      // Ensure all custom fields have valid properties
+      validatedCustomFields = customFields.map(field => {
+        // Ensure field has a name
+        if (!field.fieldName) {
+          throw new Error("All custom fields must have a name");
+        }
+        
+        // Ensure field type is valid
+        if (!['text', 'email', 'number', 'date', 'select', 'checkbox'].includes(field.fieldType)) {
+          field.fieldType = 'text'; // Default to text if invalid
+        }
+        
+        // Ensure select fields have options
+        if (field.fieldType === 'select' && (!field.options || !Array.isArray(field.options))) {
+          field.options = []; // Default to empty array
+        }
+        
+        return {
+          fieldName: field.fieldName,
+          fieldType: field.fieldType,
+          isRequired: !!field.isRequired,
+          options: field.options || [],
+          placeholder: field.placeholder || ''
+        };
+      });
+    }
+    
     const newEvent = new Event({
       name,
       date,
@@ -632,13 +674,28 @@ app.post("/api/events",  async (req, res) => {
       registeredUsers: 0,
       isFree: isFree !== undefined ? isFree : true,
       fee: isFree === false ? fee : 0,
+      customFields: validatedCustomFields,
     });
-    await newEvent.save();
-    res
-      .status(201)
-      .json({ message: "Event created successfully!", event: newEvent });
+    try {
+      await newEvent.save();
+      res
+        .status(201)
+        .json({ message: "Event created successfully!", event: newEvent });
+    } catch (saveError) {
+      console.error("Error saving event:", saveError);
+      console.error("Validation errors:", saveError.errors);
+      res.status(500).json({ 
+        message: "Error creating event", 
+        error: saveError.message,
+        validationErrors: saveError.errors 
+      });
+    }
   } catch (error) {
-    res.status(500).json({ message: "Error creating event", error });
+    console.error("Error in event creation:", error);
+    res.status(500).json({ 
+      message: "Error creating event", 
+      error: error.message 
+    });
   }
 });
 app.get("/api/events/:eventId", async (req, res) => {
@@ -654,6 +711,7 @@ app.get("/api/events/:eventId", async (req, res) => {
       registeredUsers: event.registeredUsers,
       isFree: event.isFree,
       fee: event.fee,
+      customFields: event.customFields || [],
     });
   } catch (error) {
     res.status(500).json({ message: "Error fetching event", error });
@@ -662,7 +720,10 @@ app.get("/api/events/:eventId", async (req, res) => {
 
 app.put("/api/events/:id",  async (req, res) => {
   const { id } = req.params;
-  const { name, date, description, venue, seatLimit, isFree, fee } = req.body;
+  console.log("Updating event with data:", req.body);
+  console.log("Custom fields received for update:", req.body.customFields);
+  
+  const { name, date, description, venue, seatLimit, isFree, fee, customFields } = req.body;
 
   try {
     const event = await Event.findById(id);
@@ -702,11 +763,58 @@ app.put("/api/events/:id",  async (req, res) => {
         event.fee = 0; // Reset fee to 0 if event is marked as free
       }
     }
+    
+    // Update custom fields if provided
+    if (customFields !== undefined) {
+      // Validate custom fields
+      if (Array.isArray(customFields)) {
+        // Ensure all custom fields have valid properties
+        const validatedCustomFields = customFields.map(field => {
+          // Ensure field has a name
+          if (!field.fieldName) {
+            throw new Error("All custom fields must have a name");
+          }
+          
+          // Ensure field type is valid
+          if (!['text', 'email', 'number', 'date', 'select', 'checkbox'].includes(field.fieldType)) {
+            field.fieldType = 'text'; // Default to text if invalid
+          }
+          
+          // Ensure select fields have options
+          if (field.fieldType === 'select' && (!field.options || !Array.isArray(field.options))) {
+            field.options = []; // Default to empty array
+          }
+          
+          return {
+            fieldName: field.fieldName,
+            fieldType: field.fieldType,
+            isRequired: !!field.isRequired,
+            options: field.options || [],
+            placeholder: field.placeholder || ''
+          };
+        });
+        
+        event.customFields = validatedCustomFields;
+      } else {
+        event.customFields = []; // Default to empty array if not an array
+      }
+    }
 
-    await event.save();
-    res.json({ message: "✅ Event updated successfully!", event });
+    try {
+      await event.save();
+      res.json({ message: "✅ Event updated successfully!", event });
+    } catch (saveError) {
+      console.error("Error saving event:", saveError);
+      console.error("Validation errors:", saveError.errors);
+      res.status(500).json({ 
+        message: "❌ Error saving event", 
+        error: saveError.message,
+        validationErrors: saveError.errors 
+      });
+    }
   } catch (error) {
-    res.status(500).json({ message: "❌ Server error while updating", error });
+    console.error("Error updating event:", error);
+    res.status(500).json({ message: "❌ Server error while updating", error: error.message });
   }
 });
 
@@ -725,10 +833,10 @@ app.delete("/api/events/:id",  async (req, res) => {
 
 app.post("/api/register", async (req, res) => {
   console.log("Registration request received:", req.body);
-  const { name, email, phone, eventId } = req.body;
+  const { name, email, phone, eventId, customFieldValues } = req.body;
   
   // Debug log
-  console.log("Registration data:", { name, email, phone, eventId });
+  console.log("Registration data:", { name, email, phone, eventId, customFieldValues });
 
   try {
     let event = await Event.findById(eventId);
@@ -779,6 +887,7 @@ app.post("/api/register", async (req, res) => {
       ticketId: newTicketId,
       ticket: qrImage,
       paymentStatus: 'completed', // Free events are automatically completed
+      customFieldValues: customFieldValues || {}
     });
     await registration.save();
 
@@ -858,7 +967,7 @@ app.post("/api/register", async (req, res) => {
 app.get("/api/events/:eventId/registrations",  async (req, res) => {
   try {
     const { eventId } = req.params;
-    const registrations = await Registration.find({ eventId }).select("name email");
+    const registrations = await Registration.find({ eventId }).select("name email phone customFieldValues");
 
     if (!registrations.length) {
       return res.status(404).json({ message: "No users registered for this event." });
