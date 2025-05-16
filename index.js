@@ -10,7 +10,7 @@ const bodyParser = require("body-parser");
 const app = express();
 app.use(cors({ 
   
-  origin: ["http://localhost:3000", "https://emsserver2-production.up.railway.app","https://yellowmatics-events.vercel.app"], 
+  origin: ["http://localhost:3000","https://yellowmatics-events.vercel.app"], 
   credentials: true 
 
 }));
@@ -39,6 +39,7 @@ const Event = mongoose.model(
     registeredUsers: { type: Number, default: 0 }, // Tracks how many users registered
     isFree: { type: Boolean, default: true }, // Whether the event is free or paid
     fee: { type: Number, default: 0 }, // Fee amount in INR (if paid)
+    featured: { type: Boolean, default: false }, // Whether the event is featured
     customFields: [{ 
       fieldName: String,
       fieldType: { type: String, enum: ['text', 'email', 'number', 'date', 'select', 'checkbox'], default: 'text' },
@@ -674,7 +675,7 @@ app.post("/api/events",  async (req, res) => {
   console.log("Creating event with data:", req.body);
   console.log("Custom fields received:", req.body.customFields);
   
-  const { name, date, description, venue, seatLimit, isFree, fee, customFields } = req.body;
+  const { name, date, description, venue, seatLimit, isFree, fee, featured, customFields } = req.body;
 
   if (!name || !date || !description || !venue || !seatLimit) {
     return res.status(400).json({ message: "All fields are required" });
@@ -725,6 +726,7 @@ app.post("/api/events",  async (req, res) => {
       registeredUsers: 0,
       isFree: isFree !== undefined ? isFree : true,
       fee: isFree === false ? fee : 0,
+      featured: featured || false,
       customFields: validatedCustomFields,
     });
     try {
@@ -774,7 +776,7 @@ app.put("/api/events/:id",  async (req, res) => {
   console.log("Updating event with data:", req.body);
   console.log("Custom fields received for update:", req.body.customFields);
   
-  const { name, date, description, venue, seatLimit, isFree, fee, customFields } = req.body;
+  const { name, date, description, venue, seatLimit, isFree, fee, featured, customFields } = req.body;
 
   try {
     const event = await Event.findById(id);
@@ -814,6 +816,9 @@ app.put("/api/events/:id",  async (req, res) => {
         event.fee = 0; // Reset fee to 0 if event is marked as free
       }
     }
+    
+    // Update featured status (always set it to the value provided in the request)
+    event.featured = featured || false;
     
     // Update custom fields if provided
     if (customFields !== undefined) {
