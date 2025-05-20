@@ -29,11 +29,11 @@ const generateTransactionRef = () => {
 
 // Create UPI payment
 router.post("/create-payment", async (req, res) => {
-  console.log("UPI payment creation request received:", req.body);
+  // console.log("UPI payment creation request received:", req.body);
   const { eventId, name, email, phone, customFieldValues } = req.body;
   
   // Debug log
-  console.log("UPI payment data:", { eventId, name, email, phone, customFieldValues });
+  // console.log("UPI payment data:", { eventId, name, email, phone, customFieldValues });
 
   try {
     // Validate inputs
@@ -75,15 +75,15 @@ router.post("/create-payment", async (req, res) => {
     const note = encodeURIComponent(`Payment for ${event.name}`);
     
     // Log payment details for debugging
-    console.log("Event payment details:", {
-      eventId: event._id,
-      eventName: event.name,
-      upiId: event.upiId,
-      fallbackUpiId: process.env.UPI_ID,
-      finalUpiId: upiId,
-      phoneNumber: event.phoneNumber,
-      amount: event.fee
-    });
+    // console.log("Event payment details:", {
+    //   eventId: event._id,
+    //   eventName: event.name,
+    //   upiId: event.upiId,
+    //   fallbackUpiId: process.env.UPI_ID,
+    //   finalUpiId: upiId,
+    //   phoneNumber: event.phoneNumber,
+    //   amount: event.fee
+    // });
     
     // Create UPI links for different apps
     // Standard UPI link (works with most UPI apps)
@@ -122,7 +122,7 @@ router.post("/create-payment", async (req, res) => {
       customFieldValues: customFieldValues || {}
     };
     
-    console.log("Registration data with custom fields:", registrationData);
+    // console.log("Registration data with custom fields:", registrationData);
 
     // We'll use our own QR code instead of relying on external service
     // Generate a backup QR code with a more compatible format for Google Pay
@@ -182,18 +182,65 @@ router.post("/create-payment", async (req, res) => {
   }
 });
 
+// Check payment status without uploading screenshot
+router.post("/check-payment-status", async (req, res) => {
+  const { transactionRef, email } = req.body;
+  
+  // console.log("Checking payment status for:", { transactionRef, email });
+  
+  try {
+    // Validate required fields
+    if (!transactionRef || !email) {
+      return res.status(400).json({ message: "Transaction reference and email are required" });
+    }
+    
+    // Check if a registration exists for this transaction
+    const registration = await Registration.findOne({
+      paymentId: transactionRef,
+      email,
+    });
+    
+    if (!registration) {
+      return res.json({
+        success: false,
+        message: "No registration found for this transaction reference"
+      });
+    }
+    
+    // Check if payment screenshot exists
+    if (registration.paymentScreenshot) {
+      return res.json({
+        success: true,
+        message: "Payment screenshot already exists",
+        ticketId: registration.ticketId,
+        registrationId: registration._id,
+        paymentScreenshotUrl: registration.paymentScreenshot,
+        paymentStatus: registration.paymentStatus || 'pending'
+      });
+    }
+    
+    return res.json({
+      success: false,
+      message: "No payment screenshot found for this registration"
+    });
+  } catch (error) {
+    console.error("Error checking payment status:", error);
+    return res.status(500).json({ message: "Server error checking payment status" });
+  }
+});
+
 // Verify payment
 router.post("/verify-payment", async (req, res) => {
   console.log("Verify payment request received");
   const { transactionRef, email, upiTransactionId, paymentScreenshot, registrationData } = req.body;
   
-  console.log("Registration data received:", {
-    transactionRef,
-    email,
-    upiTransactionId,
-    hasScreenshot: !!paymentScreenshot,
-    registrationData: JSON.stringify(registrationData)
-  });
+  // console.log("Registration data received:", {
+  //   transactionRef,
+  //   email,
+  //   upiTransactionId,
+  //   hasScreenshot: !!paymentScreenshot,
+  //   registrationData: JSON.stringify(registrationData)
+  // });
 
   try {
     // Validate required fields
@@ -217,11 +264,11 @@ router.post("/verify-payment", async (req, res) => {
 
     // If registration doesn't exist, create it now
     if (!registration) {
-      console.log("Creating new registration with data:", registrationData);
+      // console.log("Creating new registration with data:", registrationData);
       
       // Ensure customFieldValues is properly formatted
       let customFieldValues = registrationData.customFieldValues || {};
-      console.log("Custom field values before processing:", customFieldValues);
+      // console.log("Custom field values before processing:", customFieldValues);
       
       // Create the registration with basic fields first
       registration = new Registration({
@@ -238,7 +285,7 @@ router.post("/verify-payment", async (req, res) => {
       try {
         // Get custom field values from registration data
         let customFields = registrationData.customFieldValues || {};
-        console.log("Custom field values type:", typeof customFields);
+        // console.log("Custom field values type:", typeof customFields);
         
         // Convert to object if it's a string (JSON)
         if (typeof customFields === 'string') {
@@ -268,7 +315,7 @@ router.post("/verify-payment", async (req, res) => {
             if (value !== null && value !== undefined) {
               // Don't sanitize the key - keep it exactly as in the event definition
               customFieldsMap.set(key, value);
-              console.log(`Setting custom field: ${key} = ${value}`);
+              // console.log(`Setting custom field: ${key} = ${value}`);
             }
           });
         }
@@ -276,10 +323,10 @@ router.post("/verify-payment", async (req, res) => {
         // Set the custom field values as a Map
         registration.customFieldValues = customFieldsMap;
         
-        console.log("Created registration with custom fields:", JSON.stringify({
-          name: registration.name,
-          customFields: Array.from(registration.customFieldValues.entries())
-        }));
+        // console.log("Created registration with custom fields:", JSON.stringify({
+        //   name: registration.name,
+        //   customFields: Array.from(registration.customFieldValues.entries())
+        // }));
       } catch (customFieldError) {
         console.error("Error processing custom fields:", customFieldError);
         // Continue without custom fields if there's an error
@@ -300,15 +347,37 @@ router.post("/verify-payment", async (req, res) => {
       return res.status(404).json({ message: "Event not found" });
     }
 
+    // Check if payment screenshot already exists
+    if (registration.paymentScreenshot) {
+      console.log('Payment screenshot already exists for this registration:', registration.paymentScreenshot);
+      
+      // Return success with existing screenshot URL and ticket ID
+      return res.json({
+        success: true,
+        message: "Payment screenshot already uploaded and pending verification",
+        ticketId: registration.ticketId,
+        registrationId: registration._id,
+        paymentScreenshotUrl: registration.paymentScreenshot,
+        paymentStatus: registration.paymentStatus || 'pending'
+      });
+    }
+    
     // Upload payment screenshot to Cloudinary
     let screenshotUrl = '';
     try {
       // Check if the image is a valid base64 string
-      if (!paymentScreenshot || !paymentScreenshot.startsWith('data:image')) {
-        return res.status(400).json({ message: "Invalid payment screenshot format" });
+      if (!paymentScreenshot) {
+        return res.status(400).json({ message: "Payment screenshot is missing" });
       }
       
-      // Upload the base64 image to Cloudinary with optimization options
+      if (!paymentScreenshot.startsWith('data:image')) {
+        return res.status(400).json({ message: "Invalid payment screenshot format. Must be a valid image." });
+      }
+      
+      // Log the size of the base64 string
+      // console.log(`Payment screenshot base64 length: ${paymentScreenshot.length} characters`);
+      
+      // Upload the base64 image to Cloudinary with more lenient options
       const uploadResult = await cloudinary.uploader.upload(paymentScreenshot, {
         folder: 'payment_screenshots',
         resource_type: 'image',
@@ -317,20 +386,36 @@ router.post("/verify-payment", async (req, res) => {
         fetch_format: 'auto',
         flags: 'lossy',
         transformation: [
-          { width: 800, crop: 'limit' },
-          { quality: 'auto:good' }
-        ]
+          { width: 1200, crop: 'limit' },
+          { quality: 'auto:low' }
+        ],
+        timeout: 60000 // Increase timeout to 60 seconds
       });
       
       screenshotUrl = uploadResult.secure_url;
+      // console.log('Successfully uploaded image to Cloudinary:', screenshotUrl);
     } catch (cloudinaryError) {
       console.error('Error uploading to Cloudinary:', cloudinaryError);
-      return res.status(500).json({ message: "Failed to upload payment screenshot. Please try again with a smaller image." });
+      // Provide more specific error message
+      const errorMessage = cloudinaryError.message || "Unknown error";
+      return res.status(500).json({ 
+        message: "Failed to upload payment screenshot. Technical error: " + errorMessage,
+        error: errorMessage
+      });
     }
 
     // Update registration status - keep as pending but save screenshot
     registration.transactionId = upiTransactionId || `MANUAL-${Date.now()}`;
-    registration.paymentScreenshot = screenshotUrl;
+    
+    // Only update the screenshot if it doesn't already exist
+    if (!registration.paymentScreenshot) {
+      registration.paymentScreenshot = screenshotUrl;
+      // console.log('Saving new payment screenshot URL:', screenshotUrl);
+    } 
+    // else {
+    //   console.log('Keeping existing payment screenshot URL:', registration.paymentScreenshot);
+    // }
+    
     registration.paymentStatus = 'pending'; // Keep as pending until admin verifies
     registration.paymentVerified = false;
     
@@ -485,12 +570,18 @@ router.post("/verify-payment", async (req, res) => {
 
     await transporter.sendMail(mailOptions);
 
+    // Determine if this was a new screenshot or an existing one
+    const isNewScreenshot = !registration.paymentScreenshot || registration.paymentScreenshot === screenshotUrl;
+    
     res.json({
       success: true,
-      message: "Payment screenshot received and pending verification",
+      message: isNewScreenshot ? 
+        "Payment screenshot received and pending verification" : 
+        "Payment screenshot already exists and is pending verification",
       ticketId: registration.ticketId,
       registrationId: registration._id,
-      status: "pending"
+      status: "pending",
+      paymentScreenshotUrl: registration.paymentScreenshot
     });
   } catch (error) {
     console.error("Error verifying payment:", error);

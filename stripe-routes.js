@@ -239,7 +239,7 @@ async function handleSuccessfulPayment(paymentIntent) {
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`🎉 Registration successful for ${email}. Ticket ID: #${newTicketId}`);
+    // console.log(`🎉 Registration successful for ${email}. Ticket ID: #${newTicketId}`);
   } catch (error) {
     console.error("❌ Error processing successful payment:", error);
   }
