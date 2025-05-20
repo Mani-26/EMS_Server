@@ -68,7 +68,7 @@ router.post("/create-payment", async (req, res) => {
     await pendingRegistration.save();
 
     // Get UPI details from environment variables
-    const upiId = process.env.UPI_ID || "your-upi-id@ybl";
+    const upiId = process.env.UPI_ID;
     const merchantName = process.env.MERCHANT_NAME || "Yellowmatics Events";
     
     // Create UPI payment link

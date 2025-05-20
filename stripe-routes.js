@@ -134,9 +134,38 @@ async function handleSuccessfulPayment(paymentIntent) {
       .select("ticketId");
     const newTicketId = lastTicket ? lastTicket.ticketId + 1 : 1;
 
-    // Generate QR Code
-    const ticketCode = `${email}-${eventId}-${newTicketId}`;
-    const qrImage = await QRCode.toDataURL(ticketCode);
+    // Get event details for the QR code
+    // const event = await Event.findById(eventId);
+    
+    // Create a detailed ticket data object
+    const ticketData = {
+      name: name,
+      ticketId: newTicketId,
+      email: email,
+      phone: phone || 'Not provided',
+      eventId: eventId,
+      eventName: event.name,
+      venue: event.venue,
+      date: event.date,
+      fee: event.fee,
+      paymentStatus: 'Verified',
+      paymentMethod: 'Card',
+      registrationDate: new Date()
+    };
+    
+    // Convert to JSON string for QR code
+    const ticketCode = JSON.stringify(ticketData);
+    
+    // Generate QR code with enhanced options
+    const qrImage = await QRCode.toDataURL(ticketCode, {
+      errorCorrectionLevel: 'H',
+      margin: 1,
+      width: 300,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    });
 
     // Save Registration with ticketId and payment info
     const registration = new Registration({
@@ -197,13 +226,14 @@ async function handleSuccessfulPayment(paymentIntent) {
     let mailOptions = {
       from: "Yellowmatics.ai <events@yellowmatics.ai>",
       to: email,
-      subject: `🎟 Your Ticket for ${event.name} - ID #${newTicketId}`,
+      subject: `🎟 Your Ticket for ${event.name} | Ticket #${newTicketId}`,
       html: emailContent,
       attachments: [
         {
           filename: "ticket.png",
           content: qrImage.split(";base64,").pop(),
           encoding: "base64",
+          cid: "ticketQR" // Content ID referenced in the HTML
         },
       ],
     };

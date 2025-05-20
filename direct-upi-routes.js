@@ -30,10 +30,10 @@ const generateTransactionRef = () => {
 // Create UPI payment
 router.post("/create-payment", async (req, res) => {
   console.log("UPI payment creation request received:", req.body);
-  const { eventId, name, email, phone } = req.body;
+  const { eventId, name, email, phone, customFieldValues } = req.body;
   
   // Debug log
-  console.log("UPI payment data:", { eventId, name, email, phone });
+  console.log("UPI payment data:", { eventId, name, email, phone, customFieldValues });
 
   try {
     // Validate inputs
@@ -69,10 +69,21 @@ router.post("/create-payment", async (req, res) => {
 
     // Create UPI payment link
     // Format: upi://pay?pa=UPI_ID&pn=NAME&am=AMOUNT&tr=REF&tn=NOTE&cu=INR
-    const upiId = process.env.UPI_ID;
+    const upiId = event.upiId || process.env.UPI_ID; // Use event's UPI ID if available, otherwise fallback to env
     const merchantName = encodeURIComponent(process.env.MERCHANT_NAME || "Yellowmatics Events");
     const amount = event.fee;
     const note = encodeURIComponent(`Payment for ${event.name}`);
+    
+    // Log payment details for debugging
+    console.log("Event payment details:", {
+      eventId: event._id,
+      eventName: event.name,
+      upiId: event.upiId,
+      fallbackUpiId: process.env.UPI_ID,
+      finalUpiId: upiId,
+      phoneNumber: event.phoneNumber,
+      amount: event.fee
+    });
     
     // Create UPI links for different apps
     // Standard UPI link (works with most UPI apps)
@@ -87,8 +98,16 @@ router.post("/create-payment", async (req, res) => {
     // Use the standard UPI link as the final link
     const finalUpiLink = upiLink;
     
-    // Generate QR code for the final UPI link
-    const qrCode = await QRCode.toDataURL(finalUpiLink);
+    // Generate QR code for the final UPI link with enhanced options
+    const qrCode = await QRCode.toDataURL(finalUpiLink, {
+      errorCorrectionLevel: 'H',
+      margin: 1,
+      width: 300,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    });
 
     // We'll create the registration object but not save it to the database yet
     // It will only be saved when the user uploads a payment screenshot
@@ -100,12 +119,34 @@ router.post("/create-payment", async (req, res) => {
       paymentStatus: 'pending',
       paymentId: transactionRef,
       paymentMethod: 'upi',
+      customFieldValues: customFieldValues || {}
     };
+    
+    console.log("Registration data with custom fields:", registrationData);
 
     // We'll use our own QR code instead of relying on external service
     // Generate a backup QR code with a more compatible format for Google Pay
     const backupQrData = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(process.env.MERCHANT_NAME || "Yellowmatics Events")}&am=${amount}&cu=INR&mode=04&purpose=00`;
-    const backupQrCode = await QRCode.toDataURL(backupQrData);
+    
+    // Add additional metadata to the QR code for better tracking
+    const enhancedBackupQrData = {
+      upiLink: backupQrData,
+      eventName: event.name,
+      amount: event.fee,
+      transactionRef: transactionRef,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Generate the backup QR code with enhanced options
+    const backupQrCode = await QRCode.toDataURL(JSON.stringify(enhancedBackupQrData), {
+      errorCorrectionLevel: 'H',
+      margin: 1,
+      width: 300,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    });
 
     // Return payment details
     res.json({
@@ -116,13 +157,16 @@ router.post("/create-payment", async (req, res) => {
       phonePeLink: phonePeLink,
       qrCode,
       backupQrCode,
-      upiId,
+      upiId: event.upiId || process.env.UPI_ID, // Ensure we're using the event's UPI ID
+      phoneNumber: event.phoneNumber || "",
       amount: event.fee,
       eventDetails: {
         name: event.name,
         fee: event.fee,
         date: event.date,
         venue: event.venue,
+        upiId: event.upiId, // Include UPI ID in event details
+        phoneNumber: event.phoneNumber, // Include phone number in event details
       },
       registrationData: registrationData, // Include registration data for later use
       instructions: [
@@ -140,7 +184,16 @@ router.post("/create-payment", async (req, res) => {
 
 // Verify payment
 router.post("/verify-payment", async (req, res) => {
+  console.log("Verify payment request received");
   const { transactionRef, email, upiTransactionId, paymentScreenshot, registrationData } = req.body;
+  
+  console.log("Registration data received:", {
+    transactionRef,
+    email,
+    upiTransactionId,
+    hasScreenshot: !!paymentScreenshot,
+    registrationData: JSON.stringify(registrationData)
+  });
 
   try {
     // Validate required fields
@@ -164,11 +217,64 @@ router.post("/verify-payment", async (req, res) => {
 
     // If registration doesn't exist, create it now
     if (!registration) {
+      console.log("Creating new registration with data:", registrationData);
+      
+      // Ensure customFieldValues is properly formatted
+      let customFieldValues = registrationData.customFieldValues || {};
+      console.log("Custom field values before processing:", customFieldValues);
+      
+      // Create the registration with the custom field values as a plain object
+      // Mongoose will convert it to a Map internally
       registration = new Registration({
-        ...registrationData,
+        name: registrationData.name,
+        email: email.toLowerCase().trim(),
+        phone: registrationData.phone,
+        eventId: registrationData.eventId,
+        paymentStatus: 'pending',
         paymentId: transactionRef,
-        email: email.toLowerCase().trim()
+        paymentMethod: 'upi'
       });
+      
+      // Handle custom field values
+      try {
+        // Get custom field values from registration data
+        let customFields = registrationData.customFieldValues || {};
+        console.log("Custom field values type:", typeof customFields);
+        
+        // Convert Map to plain object if needed
+        if (customFields instanceof Map) {
+          const plainObject = {};
+          customFields.forEach((value, key) => {
+            // Sanitize key by replacing dots with underscores
+            const sanitizedKey = key.replace(/\./g, '_');
+            plainObject[sanitizedKey] = value;
+          });
+          customFields = plainObject;
+        }
+        
+        // Create a new Map for Mongoose
+        const customFieldsMap = new Map();
+        
+        // Process the custom fields
+        if (typeof customFields === 'object' && !Array.isArray(customFields)) {
+          Object.entries(customFields).forEach(([key, value]) => {
+            if (value !== null && value !== undefined) {
+              // Sanitize key by replacing dots with underscores
+              const sanitizedKey = key.replace(/\./g, '_');
+              customFieldsMap.set(sanitizedKey, value);
+            }
+          });
+        }
+        
+        // Set the custom field values as a Map
+        registration.customFieldValues = customFieldsMap;
+        
+        console.log("Created registration with custom fields:", registration);
+      } catch (customFieldError) {
+        console.error("Error processing custom fields:", customFieldError);
+        // Continue without custom fields if there's an error
+        registration.customFieldValues = new Map();
+      }
     } else if (registration.paymentStatus === 'completed') {
       return res.json({
         success: true,
@@ -242,35 +348,98 @@ router.post("/verify-payment", async (req, res) => {
       },
     });
 
+    // Create ticket data for QR code
+    const ticketData = {
+      name: registration.name,
+      ticketId: registration.ticketId,
+      email: registration.email,
+      phone: registration.phone || 'Not provided',
+      eventId: event._id.toString(),
+      eventName: event.name,
+      venue: event.venue,
+      date: event.date,
+      fee: event.fee,
+      paymentId: registration.paymentId,
+      registrationDate: registration.registrationDate,
+      paymentStatus: 'Pending Verification'
+    };
+
+    // Generate QR code with all ticket details
+    const ticketQrCode = await QRCode.toDataURL(JSON.stringify(ticketData), {
+      errorCorrectionLevel: 'H',
+      margin: 1,
+      width: 300,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    });
+
     const emailContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
-        <div style="text-align: center; margin-bottom: 20px;">
-          <img src="https://yellowmatics.ai/wp-content/uploads/2023/09/yellowmatics-logo.png" alt="Yellowmatics Logo" style="max-width: 200px;">
-        </div>
+       
         
+
         <h1 style="color: #FFA500; text-align: center;">🔄 Payment Verification in Progress</h1>
         
         <p>Hello ${registration.name},</p>
         
         <p>Thank you for registering for <strong>${event.name}</strong>. We have received your payment screenshot and it is currently being verified by our team.</p>
         
-        <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
-          <h2 style="color: #333; margin-top: 0;">🎟️ Registration Details</h2>
-          <ul style="list-style-type: none; padding-left: 0;">
-            <li style="margin-bottom: 8px;"><strong>🎫 Ticket ID:</strong> #${registration.ticketId}</li>
-            <li style="margin-bottom: 8px;"><strong>📌 Event Name:</strong> ${event.name}</li>
-            <li style="margin-bottom: 8px;"><strong>📅 Date:</strong> ${new Date(event.date).toLocaleDateString('en-US', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'})}</li>
-            <li style="margin-bottom: 8px;"><strong>📍 Venue:</strong> ${event.venue}</li>
-            <li style="margin-bottom: 8px;"><strong>💰 Fee:</strong> ₹${event.fee}</li>
-            <li style="margin-bottom: 8px;"><strong>💳 Payment Reference:</strong> ${registration.paymentId}</li>
-            <li style="margin-bottom: 8px;"><strong>📱 Phone:</strong> ${registration.phone || 'N/A'}</li>
-            <li style="margin-bottom: 8px;"><strong>📆 Registration Date:</strong> ${new Date(registration.registrationDate).toLocaleString('en-US', {dateStyle: 'full', timeStyle: 'short'})}</li>
-          </ul>
+        <div style="background-color: #f9f9f9; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #17a2b8;">
+          <h2 style="color: #333; margin-top: 0; margin-bottom: 15px;">🎟️ Your Registration Details</h2>
+          
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee; width: 40%;"><strong>👤 Name:</strong></td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;">${registration.name}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>🎫 Ticket ID:</strong></td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; color: #17a2b8;">#${registration.ticketId}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📧 Email:</strong></td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;">${registration.email}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📱 Phone:</strong></td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;">${registration.phone || 'Not provided'}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📌 Event:</strong></td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;">${event.name}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📅 Event Date:</strong></td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;">${new Date(event.date).toLocaleDateString('en-US', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'})}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📍 Venue:</strong></td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;">${event.venue}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>💰 Fee:</strong></td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;">₹${event.fee}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>💳 Payment Reference:</strong></td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;">${registration.paymentId}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📆 Registration Date:</strong></td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;">${new Date(registration.registrationDate).toLocaleString('en-US', {dateStyle: 'full', timeStyle: 'short'})}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>🔄 Status:</strong></td>
+              <td style="padding: 10px; border-bottom: 1px solid #eee;"><span style="color: #ffc107; font-weight: bold;">Pending Verification</span></td>
+            </tr>
+          </table>
         </div>
 
         <div style="background-color: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ffc107;">
           <h3 style="color: #856404; margin-top: 0;">⚠️ Important Information</h3>
-          <p style="margin-bottom: 8px;">Your payment is currently being verified by our team. Once verified, you will receive your official ticket via email.</p>
+          <p style="margin-bottom: 8px;">Your payment is currently being verified by our team. Once verified, you will receive your official ticket with QR code via email.</p>
           <p style="margin-bottom: 8px;">Please keep your Ticket ID <strong>#${registration.ticketId}</strong> handy for any communication regarding your registration.</p>
           <p style="margin-bottom: 0;">Verification usually takes 1-2 business days. Thank you for your patience.</p>
         </div>
@@ -300,7 +469,7 @@ router.post("/verify-payment", async (req, res) => {
     let mailOptions = {
       from: "Yellowmatics.ai <events@yellowmatics.ai>",
       to: registration.email,
-      subject: `🔄 Payment Verification in Progress - ${event.name} (ID #${registration.ticketId})`,
+      subject: `🔄 Payment Verification in Progress - ${event.name} | Ticket #${registration.ticketId}`,
       html: emailContent
     };
 
@@ -315,7 +484,28 @@ router.post("/verify-payment", async (req, res) => {
     });
   } catch (error) {
     console.error("Error verifying payment:", error);
-    res.status(500).json({ message: "Failed to verify payment", error: error.message });
+    
+    // Provide more detailed error information for debugging
+    let errorDetails = {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    };
+    
+    if (error.name === 'ValidationError' && error.errors) {
+      errorDetails.validationErrors = {};
+      Object.keys(error.errors).forEach(key => {
+        errorDetails.validationErrors[key] = error.errors[key].message;
+      });
+    }
+    
+    console.error("Detailed error:", errorDetails);
+    
+    res.status(500).json({ 
+      message: "Failed to verify payment", 
+      error: error.message,
+      details: errorDetails
+    });
   }
 });
 

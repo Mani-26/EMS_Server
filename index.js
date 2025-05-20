@@ -40,6 +40,8 @@ const Event = mongoose.model(
     isFree: { type: Boolean, default: true }, // Whether the event is free or paid
     fee: { type: Number, default: 0 }, // Fee amount in INR (if paid)
     featured: { type: Boolean, default: false }, // Whether the event is featured
+    upiId: String, // UPI ID for payments
+    phoneNumber: String, // Phone number for payments
     customFields: [{ 
       fieldName: String,
       fieldType: { type: String, enum: ['text', 'email', 'number', 'date', 'select', 'checkbox'], default: 'text' },
@@ -69,7 +71,11 @@ const Registration = mongoose.model(
     verificationDate: Date, // Date when payment was verified
     verifiedBy: String, // Admin who verified the payment
     registrationDate: { type: Date, default: Date.now }, // When the user registered for the event
-    customFieldValues: { type: Map, of: mongoose.Schema.Types.Mixed } // Store custom field values as key-value pairs with mixed types
+    customFieldValues: { 
+      type: Map, 
+      of: mongoose.Schema.Types.Mixed,
+      default: () => new Map()
+    } // Store custom field values as key-value pairs with mixed types
   })
 );
 
@@ -205,9 +211,50 @@ app.get("/api/events/:eventId/registrations", async (req, res) => {
     const event = await Event.findById(eventId);
     if (!event) return res.status(404).json({ message: "Event not found" });
 
+    // Get the event's custom fields
+    const eventCustomFields = event.customFields || [];
+    console.log("Event custom fields:", eventCustomFields);
+
+    // Fetch registrations
     const registrations = await Registration.find({ eventId }).select("name email phone paymentStatus paymentId transactionId paymentScreenshot paymentVerified ticketId verificationDate registrationDate customFieldValues");
     
-    res.json(registrations);
+    // Process registrations to ensure customFieldValues is properly formatted
+    const processedRegistrations = registrations.map(registration => {
+      const regObj = registration.toObject();
+      
+      // Convert Map to plain object if needed
+      try {
+        if (regObj.customFieldValues && typeof regObj.customFieldValues.toObject === 'function') {
+          regObj.customFieldValues = regObj.customFieldValues.toObject();
+        } else if (regObj.customFieldValues instanceof Map) {
+          // Convert Map to object
+          const customFieldObj = {};
+          regObj.customFieldValues.forEach((value, key) => {
+            customFieldObj[key] = value;
+          });
+          regObj.customFieldValues = customFieldObj;
+        } else if (regObj.customFieldValues && typeof regObj.customFieldValues === 'object' && !Array.isArray(regObj.customFieldValues)) {
+          // It's already an object, but make sure all values are properly serialized
+          const customFieldObj = {};
+          Object.entries(regObj.customFieldValues).forEach(([key, value]) => {
+            if (value !== null && value !== undefined) {
+              customFieldObj[key] = value;
+            }
+          });
+          regObj.customFieldValues = customFieldObj;
+        } else if (!regObj.customFieldValues) {
+          regObj.customFieldValues = {};
+        }
+      } catch (error) {
+        console.error("Error processing custom field values:", error);
+        regObj.customFieldValues = {};
+      }
+      
+      console.log("Processed registration customFieldValues:", regObj.customFieldValues);
+      return regObj;
+    });
+    
+    res.json(processedRegistrations);
   } catch (error) {
     console.error("Error fetching registrations:", error);
     res.status(500).json({ message: "Failed to fetch registrations" });
@@ -287,8 +334,37 @@ app.post("/api/admin/verify-payment", async (req, res) => {
       
       // Generate QR Code if not already present
       if (!registration.ticket) {
-        const ticketCode = `${registration.email}-${registration.eventId}-${registration.ticketId}`;
-        const qrImage = await QRCode.toDataURL(ticketCode);
+        // Create a detailed ticket data object
+        const event = await Event.findById(registration.eventId);
+
+        const ticketData = {
+          name: registration.name,
+          ticketId: registration.ticketId,
+          email: registration.email,
+          phone: registration.phone || 'Not provided',
+          eventId: registration.eventId,
+          eventName: event.name,
+          venue: event.venue,
+          date: event.date,
+          fee: event.fee,
+          paymentStatus: 'Verified',
+          registrationDate: registration.registrationDate
+        };
+        
+        // Convert to JSON string for QR code
+        const ticketCode = JSON.stringify(ticketData);
+        
+        // Generate QR code with enhanced options
+        const qrImage = await QRCode.toDataURL(ticketCode, {
+          errorCorrectionLevel: 'H',
+          margin: 1,
+          width: 300,
+          color: {
+            dark: '#000000',
+            light: '#FFFFFF'
+          }
+        });
+        
         registration.ticket = qrImage;
       }
       
@@ -327,27 +403,59 @@ app.post("/api/admin/verify-payment", async (req, res) => {
               </div>
             </div>
             
-            <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
-              <h2 style="color: #333; margin-top: 0;">📋 Event Details</h2>
-              <ul style="list-style-type: none; padding-left: 0;">
-                <li style="margin-bottom: 8px;"><strong>📌 Event Name:</strong> ${event.name}</li>
-                <li style="margin-bottom: 8px;"><strong>📅 Event Date:</strong> ${new Date(event.date).toLocaleDateString('en-US', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'})}</li>
-                <li style="margin-bottom: 8px;"><strong>📝 Description:</strong> ${event.description || 'N/A'}</li>
-                <li style="margin-bottom: 8px;"><strong>📍 Venue:</strong> ${event.venue}</li>
-              </ul>
-            </div>
-            
-            <div style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #4CAF50;">
-              <h3 style="color: #2e7d32; margin-top: 0;">✅ Registration Information</h3>
-              <ul style="list-style-type: none; padding-left: 0;">
-                <li style="margin-bottom: 8px;"><strong>🎫 Ticket ID:</strong> #${registration.ticketId}</li>
-                <li style="margin-bottom: 8px;"><strong>👤 Name:</strong> ${registration.name}</li>
-                <li style="margin-bottom: 8px;"><strong>📧 Email:</strong> ${registration.email}</li>
-                <li style="margin-bottom: 8px;"><strong>📱 Phone:</strong> ${registration.phone || 'N/A'}</li>
-                <li style="margin-bottom: 8px;"><strong>💰 Fee:</strong> ₹${event.fee}</li>
-                <li style="margin-bottom: 8px;"><strong>💳 Payment Reference:</strong> ${registration.paymentId}</li>
-                <li style="margin-bottom: 8px;"><strong>📆 Registration Date:</strong> ${registration.registrationDate ? new Date(registration.registrationDate).toLocaleString('en-US', {dateStyle: 'full', timeStyle: 'short'}) : 'N/A'}</li>
-              </ul>
+            <div style="background-color: #f9f9f9; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #17a2b8;">
+              <h2 style="color: #333; margin-top: 0; margin-bottom: 15px;">🎟️ Your Registration Details</h2>
+              
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee; width: 40%;"><strong>👤 Name:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;">${registration.name}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>🎫 Ticket ID:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; color: #17a2b8;">#${registration.ticketId}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📧 Email:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;">${registration.email}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📱 Phone:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;">${registration.phone || 'Not provided'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📌 Event:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;">${event.name}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📅 Event Date:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;">${new Date(event.date).toLocaleDateString('en-US', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'})}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📍 Venue:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;">${event.venue}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📝 Description:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;">${event.description || 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>💰 Fee:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;">₹${event.fee}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>💳 Payment Reference:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;">${registration.paymentId}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>📆 Registration Date:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;">${registration.registrationDate ? new Date(registration.registrationDate).toLocaleString('en-US', {dateStyle: 'full', timeStyle: 'short'}) : 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><strong>🔄 Status:</strong></td>
+                  <td style="padding: 10px; border-bottom: 1px solid #eee;"><span style="color: #4CAF50; font-weight: bold;">Confirmed</span></td>
+                </tr>
+              </table>
             </div>
             
             <div style="background-color: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ffc107;">
@@ -379,7 +487,7 @@ app.post("/api/admin/verify-payment", async (req, res) => {
         let mailOptions = {
           from: "Yellowmatics.ai <events@yellowmatics.ai>",
           to: registration.email,
-          subject: `🎟 Your Ticket for ${event.name} - ID #${registration.ticketId}`,
+          subject: `🎟 Your Ticket for ${event.name} | Ticket #${registration.ticketId}`,
           html: emailContent,
           attachments: [
             {
@@ -522,8 +630,8 @@ app.get("/api/events/:eventId/download", async (req, res) => {
     // Add a blank row for spacing
     worksheet.addRow([]);
     
-    // Define columns with proper width and headers
-    worksheet.columns = [
+    // Define base columns with proper width and headers
+    const baseColumns = [
       { header: 'S.No', key: 'serialNumber', width: 8 },
       { header: 'Name', key: 'name', width: 30 },
       { header: 'Email', key: 'email', width: 35 },
@@ -532,6 +640,19 @@ app.get("/api/events/:eventId/download", async (req, res) => {
       { header: 'Payment Status', key: 'paymentStatus', width: 18 },
       { header: 'Registration Date', key: 'registrationDate', width: 20 }
     ];
+    
+    // Add custom field columns if the event has custom fields
+    if (event.customFields && event.customFields.length > 0) {
+      event.customFields.forEach(field => {
+        baseColumns.push({
+          header: field.fieldName,
+          key: `custom_${field.fieldName.replace(/\s+/g, '_')}`,
+          width: 20
+        });
+      });
+    }
+    
+    worksheet.columns = baseColumns;
     
     // Style the header row
     const headerRow = worksheet.getRow(6);
@@ -556,6 +677,7 @@ app.get("/api/events/:eventId/download", async (req, res) => {
     // Add data rows with serial numbers
     let serialNumber = 1;
     registrations.forEach((registration) => {
+      // Create base row data
       const rowData = {
         serialNumber,
         name: registration.name,
@@ -574,6 +696,82 @@ app.get("/api/events/:eventId/download", async (req, res) => {
             minute: '2-digit'
           }) : 'N/A'
       };
+      
+      // Add custom field values if they exist
+      if (event.customFields && event.customFields.length > 0) {
+        // Get the custom field values from the registration
+        let customFieldValues = registration.customFieldValues || {};
+        
+        console.log(`Processing custom fields for ${registration.name}:`, customFieldValues);
+        
+        try {
+          // Convert Map to object if needed
+          if (customFieldValues instanceof Map) {
+            const tempObj = {};
+            customFieldValues.forEach((value, key) => {
+              tempObj[key] = value;
+            });
+            customFieldValues = tempObj;
+          } else if (typeof customFieldValues.toObject === 'function') {
+            customFieldValues = customFieldValues.toObject();
+          } else if (typeof customFieldValues === 'string') {
+            // Try to parse if it's a JSON string
+            try {
+              customFieldValues = JSON.parse(customFieldValues);
+            } catch (e) {
+              console.error("Error parsing customFieldValues string:", e);
+              customFieldValues = {};
+            }
+          }
+          
+          console.log(`Processed custom fields for ${registration.name}:`, customFieldValues);
+        } catch (error) {
+          console.error(`Error processing custom fields for ${registration.name}:`, error);
+          customFieldValues = {};
+        }
+        
+        // Add each custom field value to the row data
+        event.customFields.forEach(field => {
+          const fieldKey = `custom_${field.fieldName.replace(/\s+/g, '_')}`;
+          
+          // Get the field value, handling different ways it might be stored
+          let fieldValue;
+          
+          if (customFieldValues && typeof customFieldValues === 'object') {
+            // If it's a Map, try to get the value using get()
+            if (customFieldValues instanceof Map) {
+              fieldValue = customFieldValues.get(field.fieldName);
+            } else {
+              // Try to get the value directly from the object
+              fieldValue = customFieldValues[field.fieldName];
+              
+              // If not found, try case-insensitive match
+              if (fieldValue === undefined) {
+                const lowerFieldName = field.fieldName.toLowerCase();
+                Object.keys(customFieldValues).forEach(key => {
+                  if (key.toLowerCase() === lowerFieldName) {
+                    fieldValue = customFieldValues[key];
+                  }
+                });
+              }
+            }
+          }
+          
+          console.log(`Field: ${field.fieldName}, Value: ${fieldValue}, Type: ${typeof fieldValue}`);
+          
+          // Format date values
+          if (field.fieldType === 'date' && fieldValue && typeof fieldValue === 'string' && 
+              /^\d{4}-\d{2}-\d{2}$/.test(fieldValue)) {
+            rowData[fieldKey] = new Date(fieldValue).toLocaleDateString('en-US', {
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric'
+            });
+          } else {
+            rowData[fieldKey] = fieldValue !== undefined && fieldValue !== null ? fieldValue.toString() : 'N/A';
+          }
+        });
+      }
       
       const row = worksheet.addRow(rowData);
       
@@ -675,7 +873,7 @@ app.post("/api/events",  async (req, res) => {
   console.log("Creating event with data:", req.body);
   console.log("Custom fields received:", req.body.customFields);
   
-  const { name, date, description, venue, seatLimit, isFree, fee, featured, customFields } = req.body;
+  const { name, date, description, venue, seatLimit, isFree, fee, featured, customFields, upiId, phoneNumber } = req.body;
 
   if (!name || !date || !description || !venue || !seatLimit) {
     return res.status(400).json({ message: "All fields are required" });
@@ -727,6 +925,8 @@ app.post("/api/events",  async (req, res) => {
       isFree: isFree !== undefined ? isFree : true,
       fee: isFree === false ? fee : 0,
       featured: featured || false,
+      upiId: upiId || process.env.UPI_ID, // Use provided UPI ID or fallback to env
+      phoneNumber: phoneNumber || "", // Use provided phone number or empty string
       customFields: validatedCustomFields,
     });
     try {
@@ -930,9 +1130,37 @@ app.post("/api/register", async (req, res) => {
       .select("ticketId");
     const newTicketId = lastTicket ? lastTicket.ticketId + 1 : 1;
 
-    // Generate QR Code
-    const ticketCode = `${email}-${eventId}-${newTicketId}`;
-    const qrImage = await QRCode.toDataURL(ticketCode);
+    // Get event details for the QR code
+    // const event = await Event.findById(eventId);
+    
+    // Create a detailed ticket data object
+    const ticketData = {
+      name: name,
+      ticketId: newTicketId,
+      email: email,
+      phone: phone || 'Not provided',
+      eventId: eventId,
+      eventName: event.name,
+      venue: event.venue,
+      date: event.date,
+      fee: event.fee,
+      paymentStatus: 'Verified',
+      registrationDate: new Date()
+    };
+    
+    // Convert to JSON string for QR code
+    const ticketCode = JSON.stringify(ticketData);
+    
+    // Generate QR code with enhanced options
+    const qrImage = await QRCode.toDataURL(ticketCode, {
+      errorCorrectionLevel: 'H',
+      margin: 1,
+      width: 300,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    });
 
     // **Save Registration with ticketId**
     const registration = new Registration({
@@ -942,9 +1170,24 @@ app.post("/api/register", async (req, res) => {
       eventId,
       ticketId: newTicketId,
       ticket: qrImage,
-      paymentStatus: 'completed', // Free events are automatically completed
-      customFieldValues: customFieldValues || {}
+      paymentStatus: 'completed' // Free events are automatically completed
     });
+    
+    // Set custom field values if they exist
+    if (customFieldValues && typeof customFieldValues === 'object' && !Array.isArray(customFieldValues)) {
+      // Create a new Map for the custom field values
+      const customFieldMap = new Map();
+      
+      // Add each custom field value to the Map
+      Object.entries(customFieldValues).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          customFieldMap.set(key, value);
+        }
+      });
+      
+      // Set the custom field values
+      registration.customFieldValues = customFieldMap;
+    }
     await registration.save();
 
     // Reduce remaining seats and update DB
@@ -998,13 +1241,14 @@ app.post("/api/register", async (req, res) => {
     let mailOptions = {
       from: "Yellowmatics.ai <events@yellowmatics.ai>",
       to: email,
-      subject: `🎟 Your Ticket for ${event.name} - ID #${newTicketId}`,
+      subject: `🎟 Your Ticket for ${event.name} | Ticket #${newTicketId}`,
       html: emailContent,
       attachments: [
         {
           filename: "ticket.png",
           content: qrImage.split(";base64,").pop(),
           encoding: "base64",
+          cid: "ticketQR" // Content ID referenced in the HTML
         },
       ],
     };
