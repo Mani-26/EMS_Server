@@ -223,8 +223,7 @@ router.post("/verify-payment", async (req, res) => {
       let customFieldValues = registrationData.customFieldValues || {};
       console.log("Custom field values before processing:", customFieldValues);
       
-      // Create the registration with the custom field values as a plain object
-      // Mongoose will convert it to a Map internally
+      // Create the registration with basic fields first
       registration = new Registration({
         name: registrationData.name,
         email: email.toLowerCase().trim(),
@@ -241,13 +240,21 @@ router.post("/verify-payment", async (req, res) => {
         let customFields = registrationData.customFieldValues || {};
         console.log("Custom field values type:", typeof customFields);
         
+        // Convert to object if it's a string (JSON)
+        if (typeof customFields === 'string') {
+          try {
+            customFields = JSON.parse(customFields);
+          } catch (e) {
+            console.error("Error parsing customFields JSON string:", e);
+            customFields = {};
+          }
+        }
+        
         // Convert Map to plain object if needed
         if (customFields instanceof Map) {
           const plainObject = {};
           customFields.forEach((value, key) => {
-            // Sanitize key by replacing dots with underscores
-            const sanitizedKey = key.replace(/\./g, '_');
-            plainObject[sanitizedKey] = value;
+            plainObject[key] = value;
           });
           customFields = plainObject;
         }
@@ -259,9 +266,9 @@ router.post("/verify-payment", async (req, res) => {
         if (typeof customFields === 'object' && !Array.isArray(customFields)) {
           Object.entries(customFields).forEach(([key, value]) => {
             if (value !== null && value !== undefined) {
-              // Sanitize key by replacing dots with underscores
-              const sanitizedKey = key.replace(/\./g, '_');
-              customFieldsMap.set(sanitizedKey, value);
+              // Don't sanitize the key - keep it exactly as in the event definition
+              customFieldsMap.set(key, value);
+              console.log(`Setting custom field: ${key} = ${value}`);
             }
           });
         }
@@ -269,7 +276,10 @@ router.post("/verify-payment", async (req, res) => {
         // Set the custom field values as a Map
         registration.customFieldValues = customFieldsMap;
         
-        console.log("Created registration with custom fields:", registration);
+        console.log("Created registration with custom fields:", JSON.stringify({
+          name: registration.name,
+          customFields: Array.from(registration.customFieldValues.entries())
+        }));
       } catch (customFieldError) {
         console.error("Error processing custom fields:", customFieldError);
         // Continue without custom fields if there's an error

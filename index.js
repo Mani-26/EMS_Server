@@ -245,16 +245,26 @@ app.get("/api/events/:eventId/registrations", async (req, res) => {
         } else if (!regObj.customFieldValues) {
           regObj.customFieldValues = {};
         }
+        
+        // Check if we have any custom field values
+        regObj.hasCustomFields = Object.keys(regObj.customFieldValues).length > 0;
       } catch (error) {
         console.error("Error processing custom field values:", error);
         regObj.customFieldValues = {};
+        regObj.hasCustomFields = false;
       }
       
       console.log("Processed registration customFieldValues:", regObj.customFieldValues);
       return regObj;
     });
     
-    res.json(processedRegistrations);
+    // Add event custom fields to the response
+    const response = {
+      eventCustomFields: eventCustomFields,
+      registrations: processedRegistrations
+    };
+    
+    res.json(response);
   } catch (error) {
     console.error("Error fetching registrations:", error);
     res.status(500).json({ message: "Failed to fetch registrations" });
@@ -700,31 +710,40 @@ app.get("/api/events/:eventId/download", async (req, res) => {
       // Add custom field values if they exist
       if (event.customFields && event.customFields.length > 0) {
         // Get the custom field values from the registration
-        let customFieldValues = registration.customFieldValues || {};
+        let customFieldValues = {};
         
-        console.log(`Processing custom fields for ${registration.name}:`, customFieldValues);
+        // Log the raw customFieldValues for debugging
+        console.log(`Raw customFieldValues for ${registration.name}:`, registration.customFieldValues);
         
         try {
-          // Convert Map to object if needed
-          if (customFieldValues instanceof Map) {
-            const tempObj = {};
-            customFieldValues.forEach((value, key) => {
-              tempObj[key] = value;
-            });
-            customFieldValues = tempObj;
-          } else if (typeof customFieldValues.toObject === 'function') {
-            customFieldValues = customFieldValues.toObject();
-          } else if (typeof customFieldValues === 'string') {
-            // Try to parse if it's a JSON string
-            try {
-              customFieldValues = JSON.parse(customFieldValues);
-            } catch (e) {
-              console.error("Error parsing customFieldValues string:", e);
+          // Handle different types of customFieldValues
+          if (registration.customFieldValues) {
+            if (registration.customFieldValues instanceof Map) {
+              // It's already a Map, convert to object for easier handling
               customFieldValues = {};
+              registration.customFieldValues.forEach((value, key) => {
+                customFieldValues[key] = value;
+              });
+              console.log(`Converted Map to object for ${registration.name}:`, customFieldValues);
+            } else if (typeof registration.customFieldValues.toObject === 'function') {
+              // It's a Mongoose Map, convert to plain object
+              customFieldValues = registration.customFieldValues.toObject();
+              console.log(`Converted Mongoose Map to object for ${registration.name}:`, customFieldValues);
+            } else if (typeof registration.customFieldValues === 'string') {
+              // It's a JSON string, parse it
+              try {
+                customFieldValues = JSON.parse(registration.customFieldValues);
+                console.log(`Parsed JSON string for ${registration.name}:`, customFieldValues);
+              } catch (e) {
+                console.error(`Error parsing customFieldValues string for ${registration.name}:`, e);
+                customFieldValues = {};
+              }
+            } else if (typeof registration.customFieldValues === 'object' && !Array.isArray(registration.customFieldValues)) {
+              // It's already an object
+              customFieldValues = registration.customFieldValues;
+              console.log(`Using object directly for ${registration.name}:`, customFieldValues);
             }
           }
-          
-          console.log(`Processed custom fields for ${registration.name}:`, customFieldValues);
         } catch (error) {
           console.error(`Error processing custom fields for ${registration.name}:`, error);
           customFieldValues = {};
@@ -733,31 +752,45 @@ app.get("/api/events/:eventId/download", async (req, res) => {
         // Add each custom field value to the row data
         event.customFields.forEach(field => {
           const fieldKey = `custom_${field.fieldName.replace(/\s+/g, '_')}`;
+          let fieldValue = null;
           
-          // Get the field value, handling different ways it might be stored
-          let fieldValue;
-          
-          if (customFieldValues && typeof customFieldValues === 'object') {
-            // If it's a Map, try to get the value using get()
-            if (customFieldValues instanceof Map) {
-              fieldValue = customFieldValues.get(field.fieldName);
-            } else {
-              // Try to get the value directly from the object
-              fieldValue = customFieldValues[field.fieldName];
-              
-              // If not found, try case-insensitive match
-              if (fieldValue === undefined) {
-                const lowerFieldName = field.fieldName.toLowerCase();
-                Object.keys(customFieldValues).forEach(key => {
-                  if (key.toLowerCase() === lowerFieldName) {
-                    fieldValue = customFieldValues[key];
-                  }
-                });
-              }
+          // Try multiple ways to get the field value
+          if (registration.customFieldValues instanceof Map) {
+            // Try direct access from Map
+            fieldValue = registration.customFieldValues.get(field.fieldName);
+            console.log(`Direct Map access for ${field.fieldName}:`, fieldValue);
+            
+            // If not found, try with case-insensitive match
+            if (fieldValue === undefined || fieldValue === null) {
+              const lowerFieldName = field.fieldName.toLowerCase();
+              registration.customFieldValues.forEach((value, key) => {
+                if (key.toLowerCase() === lowerFieldName && (fieldValue === undefined || fieldValue === null)) {
+                  fieldValue = value;
+                  console.log(`Case-insensitive Map match for ${field.fieldName} using ${key}:`, fieldValue);
+                }
+              });
             }
           }
           
-          console.log(`Field: ${field.fieldName}, Value: ${fieldValue}, Type: ${typeof fieldValue}`);
+          // If still not found, try from the converted object
+          if ((fieldValue === undefined || fieldValue === null) && typeof customFieldValues === 'object') {
+            // Try direct access
+            fieldValue = customFieldValues[field.fieldName];
+            console.log(`Direct object access for ${field.fieldName}:`, fieldValue);
+            
+            // If not found, try with case-insensitive match
+            if (fieldValue === undefined || fieldValue === null) {
+              const lowerFieldName = field.fieldName.toLowerCase();
+              Object.keys(customFieldValues).forEach(key => {
+                if (key.toLowerCase() === lowerFieldName && (fieldValue === undefined || fieldValue === null)) {
+                  fieldValue = customFieldValues[key];
+                  console.log(`Case-insensitive object match for ${field.fieldName} using ${key}:`, fieldValue);
+                }
+              });
+            }
+          }
+          
+          console.log(`Final field value for ${field.fieldName}:`, fieldValue);
           
           // Format date values
           if (field.fieldType === 'date' && fieldValue && typeof fieldValue === 'string' && 
@@ -864,8 +897,25 @@ app.get("/api/events/:eventId/download", async (req, res) => {
 
 
 app.get("/api/events", async (req, res) => {
-  const events = await Event.find();
-  res.json(events);
+  try {
+    const events = await Event.find().sort({ date: -1 });
+    
+    // Log the events being returned
+    console.log("Returning events with UPI IDs and phone numbers:", 
+      events.map(event => ({
+        id: event._id,
+        name: event.name,
+        upiId: event.upiId,
+        phoneNumber: event.phoneNumber,
+        featured: event.featured
+      }))
+    );
+    
+    res.json(events);
+  } catch (error) {
+    console.error("Error fetching events:", error);
+    res.status(500).json({ message: "Error fetching events", error });
+  }
 });
 
 // Create a new event (Admin Only)
@@ -964,6 +1014,9 @@ app.get("/api/events/:eventId", async (req, res) => {
       registeredUsers: event.registeredUsers,
       isFree: event.isFree,
       fee: event.fee,
+      featured: event.featured || false,
+      upiId: event.upiId || '',
+      phoneNumber: event.phoneNumber || '',
       customFields: event.customFields || [],
     });
   } catch (error) {
@@ -976,7 +1029,7 @@ app.put("/api/events/:id",  async (req, res) => {
   console.log("Updating event with data:", req.body);
   console.log("Custom fields received for update:", req.body.customFields);
   
-  const { name, date, description, venue, seatLimit, isFree, fee, featured, customFields } = req.body;
+  const { name, date, description, venue, seatLimit, isFree, fee, featured, upiId, phoneNumber, customFields } = req.body;
 
   try {
     const event = await Event.findById(id);
@@ -1018,7 +1071,21 @@ app.put("/api/events/:id",  async (req, res) => {
     }
     
     // Update featured status (always set it to the value provided in the request)
-    event.featured = featured || false;
+    event.featured = featured !== undefined ? featured : false;
+    
+    // Update UPI ID and phone number if provided
+    console.log("Received UPI ID:", upiId);
+    console.log("Received phone number:", phoneNumber);
+    
+    if (upiId !== undefined) {
+      event.upiId = upiId;
+      console.log("Updated event UPI ID to:", event.upiId);
+    }
+    
+    if (phoneNumber !== undefined) {
+      event.phoneNumber = phoneNumber;
+      console.log("Updated event phone number to:", event.phoneNumber);
+    }
     
     // Update custom fields if provided
     if (customFields !== undefined) {
@@ -1058,7 +1125,27 @@ app.put("/api/events/:id",  async (req, res) => {
 
     try {
       await event.save();
-      res.json({ message: "✅ Event updated successfully!", event });
+      
+      // Log the updated event
+      console.log("Updated event:", {
+        id: event._id,
+        name: event.name,
+        upiId: event.upiId,
+        phoneNumber: event.phoneNumber,
+        featured: event.featured
+      });
+      
+      res.json({ 
+        message: "✅ Event updated successfully!", 
+        event: {
+          id: event._id,
+          name: event.name,
+          upiId: event.upiId,
+          phoneNumber: event.phoneNumber,
+          featured: event.featured,
+          customFields: event.customFields
+        }
+      });
     } catch (saveError) {
       console.error("Error saving event:", saveError);
       console.error("Validation errors:", saveError.errors);
@@ -1174,19 +1261,39 @@ app.post("/api/register", async (req, res) => {
     });
     
     // Set custom field values if they exist
-    if (customFieldValues && typeof customFieldValues === 'object' && !Array.isArray(customFieldValues)) {
+    if (customFieldValues) {
+      console.log("Processing custom field values:", customFieldValues);
+      
+      // Handle different types of customFieldValues input
+      let processedCustomFields = customFieldValues;
+      
+      // If it's a string (JSON), parse it
+      if (typeof customFieldValues === 'string') {
+        try {
+          processedCustomFields = JSON.parse(customFieldValues);
+        } catch (e) {
+          console.error("Error parsing customFieldValues JSON string:", e);
+          processedCustomFields = {};
+        }
+      }
+      
       // Create a new Map for the custom field values
       const customFieldMap = new Map();
       
       // Add each custom field value to the Map
-      Object.entries(customFieldValues).forEach(([key, value]) => {
-        if (value !== null && value !== undefined) {
-          customFieldMap.set(key, value);
-        }
-      });
+      if (typeof processedCustomFields === 'object' && !Array.isArray(processedCustomFields)) {
+        Object.entries(processedCustomFields).forEach(([key, value]) => {
+          if (value !== null && value !== undefined) {
+            console.log(`Setting custom field: ${key} = ${value}`);
+            customFieldMap.set(key, value);
+          }
+        });
+      }
       
       // Set the custom field values
       registration.customFieldValues = customFieldMap;
+      
+      console.log("Final custom fields map:", Array.from(customFieldMap.entries()));
     }
     await registration.save();
 
@@ -1263,22 +1370,7 @@ app.post("/api/register", async (req, res) => {
   }
 });
 
-// Get all registrations for a specific event
-app.get("/api/events/:eventId/registrations",  async (req, res) => {
-  try {
-    const { eventId } = req.params;
-    const registrations = await Registration.find({ eventId }).select("name email phone customFieldValues");
-
-    if (!registrations.length) {
-      return res.status(404).json({ message: "No users registered for this event." });
-    }
-
-    res.json(registrations);
-  } catch (error) {
-    console.error("Error fetching registrations:", error);
-    res.status(500).json({ message: "Server error", error });
-  }
-});
+// This endpoint has been consolidated with the one above
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
