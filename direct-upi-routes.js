@@ -29,11 +29,18 @@ const generateTransactionRef = () => {
 
 // Create UPI payment
 router.post("/create-payment", async (req, res) => {
-  // console.log("UPI payment creation request received:", req.body);
+  console.log("UPI payment creation request received");
   const { eventId, name, email, phone, customFieldValues } = req.body;
   
   // Debug log
-  // console.log("UPI payment data:", { eventId, name, email, phone, customFieldValues });
+  console.log("UPI payment data:", { 
+    eventId, 
+    name, 
+    email, 
+    phone, 
+    hasCustomFields: !!customFieldValues,
+    customFieldValues: JSON.stringify(customFieldValues)
+  });
 
   try {
     // Validate inputs
@@ -285,7 +292,8 @@ router.post("/verify-payment", async (req, res) => {
       try {
         // Get custom field values from registration data
         let customFields = registrationData.customFieldValues || {};
-        // console.log("Custom field values type:", typeof customFields);
+        console.log("Custom field values type:", typeof customFields);
+        console.log("Custom field values:", JSON.stringify(customFields, null, 2));
         
         // Convert to object if it's a string (JSON)
         if (typeof customFields === 'string') {
@@ -311,22 +319,29 @@ router.post("/verify-payment", async (req, res) => {
         
         // Process the custom fields
         if (typeof customFields === 'object' && !Array.isArray(customFields)) {
+          console.log("Processing custom fields object with keys:", Object.keys(customFields));
+          
           Object.entries(customFields).forEach(([key, value]) => {
             if (value !== null && value !== undefined) {
               // Don't sanitize the key - keep it exactly as in the event definition
               customFieldsMap.set(key, value);
-              // console.log(`Setting custom field: ${key} = ${value}`);
+              console.log(`Setting custom field: ${key} = ${JSON.stringify(value)}`);
             }
           });
+          
+          console.log("Final custom fields map size:", customFieldsMap.size);
+          console.log("Final custom fields map keys:", Array.from(customFieldsMap.keys()));
+        } else {
+          console.warn("Custom fields is not a valid object:", typeof customFields, Array.isArray(customFields));
         }
         
         // Set the custom field values as a Map
         registration.customFieldValues = customFieldsMap;
         
-        // console.log("Created registration with custom fields:", JSON.stringify({
-        //   name: registration.name,
-        //   customFields: Array.from(registration.customFieldValues.entries())
-        // }));
+        console.log("Created registration with custom fields:", JSON.stringify({
+          name: registration.name,
+          customFields: Array.from(registration.customFieldValues.entries())
+        }));
       } catch (customFieldError) {
         console.error("Error processing custom fields:", customFieldError);
         // Continue without custom fields if there's an error
@@ -434,12 +449,18 @@ router.post("/verify-payment", async (req, res) => {
     event.registeredUsers += 1;
     await event.save();
 
-    // Send confirmation email with ticket
+    // Send confirmation email with ticket using event-specific email if available
+    const emailUser = event.emailForNotifications || process.env.EMAIL_USER;
+    const emailPass = event.appPassword || process.env.EMAIL_PASS;
+    
     const transporter = nodemailer.createTransport({
       service: "gmail",
+      secure: true,
+      socketTimeout: 10000,
+      connectionTimeout: 10000, 
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user: emailUser,
+        pass: emailPass,
       },
     });
 
@@ -561,8 +582,12 @@ router.post("/verify-payment", async (req, res) => {
       </div>
     `;
 
+    // Extract email username for the from field
+    const emailUsername = emailUser.split('@')[0];
+    const emailDomain = emailUser.split('@')[1];
+    
     let mailOptions = {
-      from: "Yellowmatics.ai <events@yellowmatics.ai>",
+      from: `Yellowmatics.ai <${emailUser}>`,
       to: registration.email,
       subject: `🔄 Payment Verification in Progress - ${event.name} | Ticket #${registration.ticketId}`,
       html: emailContent

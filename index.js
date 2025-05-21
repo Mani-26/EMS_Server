@@ -42,6 +42,8 @@ const Event = mongoose.model(
     featured: { type: Boolean, default: false }, // Whether the event is featured
     upiId: String, // UPI ID for payments
     phoneNumber: String, // Phone number for payments
+    emailForNotifications: String, // Email for sending notifications
+    appPassword: String, // App password for the email account
     customFields: [{ 
       fieldName: String,
       fieldType: { type: String, enum: ['text', 'email', 'number', 'date', 'select', 'checkbox'], default: 'text' },
@@ -322,6 +324,27 @@ app.post("/api/admin/verify-payment", async (req, res) => {
     const registration = await Registration.findById(registrationId);
     if (!registration) {
       return res.status(404).json({ message: "Registration not found" });
+    }
+    
+    console.log("Verifying payment for registration:", registrationId);
+    console.log("Current custom field values:", registration.customFieldValues);
+    
+    // Check if customFieldValues is empty but should have values
+    if (!registration.customFieldValues || 
+        (registration.customFieldValues instanceof Map && registration.customFieldValues.size === 0) ||
+        (typeof registration.customFieldValues === 'object' && Object.keys(registration.customFieldValues).length === 0)) {
+      
+      console.log("Custom field values are empty, checking if we need to restore them");
+      
+      // Get the event to check if it has custom fields
+      const event = await Event.findById(registration.eventId);
+      if (event && event.customFields && event.customFields.length > 0) {
+        console.log("Event has custom fields, but registration doesn't have values");
+        // This is a case where custom fields might have been lost
+        // We could try to recover them from the original registration data if available
+        // For now, we'll just log this issue
+        console.log("WARNING: Registration is missing custom field values for an event with custom fields");
+      }
     }
     
     // Update verification status
@@ -921,7 +944,7 @@ app.post("/api/events",  async (req, res) => {
   // console.log("Creating event with data:", req.body);
   // console.log("Custom fields received:", req.body.customFields);
   
-  const { name, date, description, venue, seatLimit, isFree, fee, featured, customFields, upiId, phoneNumber } = req.body;
+  const { name, date, description, venue, seatLimit, isFree, fee, featured, customFields, upiId, phoneNumber, emailForNotifications, appPassword } = req.body;
 
   if (!name || !date || !description || !venue || !seatLimit) {
     return res.status(400).json({ message: "All fields are required" });
@@ -975,6 +998,8 @@ app.post("/api/events",  async (req, res) => {
       featured: featured || false,
       upiId: upiId || process.env.UPI_ID, // Use provided UPI ID or fallback to env
       phoneNumber: phoneNumber || "", // Use provided phone number or empty string
+      emailForNotifications: emailForNotifications || process.env.EMAIL_USER, // Use provided email or fallback to env
+      appPassword: appPassword || process.env.EMAIL_PASS, // Use provided app password or fallback to env
       customFields: validatedCustomFields,
     });
     try {
@@ -1015,6 +1040,8 @@ app.get("/api/events/:eventId", async (req, res) => {
       featured: event.featured || false,
       upiId: event.upiId || '',
       phoneNumber: event.phoneNumber || '',
+      emailForNotifications: event.emailForNotifications || '',
+      appPassword: event.appPassword || '',
       customFields: event.customFields || [],
     });
   } catch (error) {
@@ -1260,7 +1287,7 @@ app.post("/api/register", async (req, res) => {
     
     // Set custom field values if they exist
     if (customFieldValues) {
-      // console.log("Processing custom field values:", customFieldValues);
+      console.log("Processing custom field values:", JSON.stringify(customFieldValues));
       
       // Handle different types of customFieldValues input
       let processedCustomFields = customFieldValues;
@@ -1269,6 +1296,7 @@ app.post("/api/register", async (req, res) => {
       if (typeof customFieldValues === 'string') {
         try {
           processedCustomFields = JSON.parse(customFieldValues);
+          console.log("Parsed JSON string to:", JSON.stringify(processedCustomFields));
         } catch (e) {
           console.error("Error parsing customFieldValues JSON string:", e);
           processedCustomFields = {};
@@ -1282,7 +1310,8 @@ app.post("/api/register", async (req, res) => {
       if (typeof processedCustomFields === 'object' && !Array.isArray(processedCustomFields)) {
         Object.entries(processedCustomFields).forEach(([key, value]) => {
           if (value !== null && value !== undefined) {
-            // console.log(`Setting custom field: ${key} = ${value}`);
+            console.log(`Setting custom field: ${key} = ${value}`);
+            // Don't sanitize the key - keep it exactly as in the event definition
             customFieldMap.set(key, value);
           }
         });
@@ -1291,7 +1320,7 @@ app.post("/api/register", async (req, res) => {
       // Set the custom field values
       registration.customFieldValues = customFieldMap;
       
-      // console.log("Final custom fields map:", Array.from(customFieldMap.entries()));
+      console.log("Final custom fields map:", Array.from(customFieldMap.entries()));
     }
     await registration.save();
 
@@ -1305,13 +1334,19 @@ app.post("/api/register", async (req, res) => {
     // **Debugging Step: Log ticketId to check if it's correctly assigned**
     console.log(`🎫 New Ticket Assigned: ${newTicketId} for ${email}`);
 
-    // **Send Email with Ticket ID**
-    let transporter = nodemailer.createTransport({
+    // **Send Email with Ticket ID using event-specific email if available**
+    const emailUser = event.emailForNotifications || process.env.EMAIL_USER;
+    const emailPass = event.appPassword || process.env.EMAIL_PASS;
+    
+    const transporter = nodemailer.createTransport({
       service: "Gmail",
-      auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+      auth: { 
+        user: emailUser, 
+        pass: emailPass 
+      },
     });
 
-    let emailContent = `
+    const emailContent = `
         <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto;">
           <h2 style="text-align: center; color: #007bff;">🎉 Congratulations, ${name}! You're Registered! 🎟</h2>
           <p>Dear <strong>${name}</strong>,</p>
@@ -1344,9 +1379,9 @@ app.post("/api/register", async (req, res) => {
       `;
 
     let mailOptions = {
-      from: "Yellowmatics.ai <events@yellowmatics.ai>",
+      from: `Yellowmatics.ai <${emailUser}>`,
       to: email,
-      subject: `🎟 Your Ticket for ${event.name} | Ticket #${newTicketId}`,
+      subject: `✅ Registration Confirmed - ${event.name} | Ticket #${newTicketId}`,
       html: emailContent,
       attachments: [
         {
