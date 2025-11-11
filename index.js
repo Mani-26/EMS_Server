@@ -100,6 +100,21 @@ directUpiModule.initModels({ Event, Registration });
 app.use("/api/upi", directUpiModule.router);
 const bcrypt = require("bcryptjs");
 
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    console.log('Webhook event received:', req.body);
+    res.status(200).json({ message: 'Received successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+
 // Admin Registration (Only for first-time setup)
 app.post("/api/admin/register", async (req, res) => {
   const { name, email, password } = req.body;
