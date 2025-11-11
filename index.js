@@ -102,13 +102,17 @@ const bcrypt = require("bcryptjs");
 
 app.post("/webhook", (req, res) => {
   console.log("Webhook event received:", req.body);
+
   res.status(200).json({
     status: "success",
-    message: "Webhook executed successfully"
+    code: 200,
+    message: "Webhook executed successfully",
+    result: {
+      received: true,
+      timestamp: new Date().toISOString()
+    }
   });
 });
-
-
 
 
 // Admin Registration (Only for first-time setup)
