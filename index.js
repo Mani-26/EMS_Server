@@ -101,14 +101,25 @@ app.use("/api/upi", directUpiModule.router);
 const bcrypt = require("bcryptjs");
 
 app.head('/my-webhook', (req, res) => {
-    res.status(200).end(); // No body for HEAD
+  res.status(200).end(); // respond 200 for HEAD validation
 });
 
-// Handle POST requests from SalesIQ after verification
 app.post('/my-webhook', (req, res) => {
-    console.log(req.body); // Process incoming webhook data
-    res.status(200).json({ status: 'success' });
+  console.log("📥 SalesIQ Webhook Received:", JSON.stringify(req.body, null, 2));
+
+  // Always respond in the exact JSON format Zoho expects
+  res.status(200).json({
+    status: "success",
+    code: 200,
+    message: "Webhook executed successfully",
+    data: {
+      received: true,
+      handler: req.body.handler || "unknown"
+    }
+  });
 });
+
+
 // app.post("/webhook", (req, res) => {
 //   console.log("Webhook event received:", req.body);
 
