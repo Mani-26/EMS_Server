@@ -100,16 +100,14 @@ directUpiModule.initModels({ Event, Registration });
 app.use("/api/upi", directUpiModule.router);
 const bcrypt = require("bcryptjs");
 
-// Zoho SalesIQ Webhook Validation (HEAD request)
-app.head("/webhook", (req, res) => {
-  res.status(200).send(); // Respond with 200 OK
-});
-
-// Actual webhook event receiver (POST request)
 app.post("/webhook", (req, res) => {
   console.log("Webhook event received:", req.body);
-  res.status(200).json({ message: "Webhook received successfully" });
+  res.status(200).json({
+    status: "success",
+    message: "Webhook executed successfully"
+  });
 });
+
 
 
 
