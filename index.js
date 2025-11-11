@@ -100,41 +100,6 @@ directUpiModule.initModels({ Event, Registration });
 app.use("/api/upi", directUpiModule.router);
 const bcrypt = require("bcryptjs");
 
-app.head('/my-webhook', (req, res) => {
-  res.status(200).end(); // respond 200 for HEAD validation
-});
-
-app.post('/my-webhook', (req, res) => {
-  console.log("📥 SalesIQ Webhook Received:", JSON.stringify(req.body, null, 2));
-
-  // Always respond in the exact JSON format Zoho expects
-  res.status(200).json({
-    status: "success",
-    code: 200,
-    message: "Webhook executed successfully",
-    data: {
-      received: true,
-      handler: req.body.handler || "unknown"
-    }
-  });
-});
-
-
-// app.post("/webhook", (req, res) => {
-//   console.log("Webhook event received:", req.body);
-
-//   res.status(200).json({
-//     status: "success",
-//     code: 200,
-//     message: "Webhook executed successfully",
-//     result: {
-//       received: true,
-//       timestamp: new Date().toISOString()
-//     }
-//   });
-// });
-
-
 // Admin Registration (Only for first-time setup)
 app.post("/api/admin/register", async (req, res) => {
   const { name, email, password } = req.body;
