@@ -1,10 +1,11 @@
-require("dotenv").config();
 const express = require("express");
 const router = express.Router();
 const QRCode = require("qrcode");
-const nodemailer = require("nodemailer");
 const crypto = require("crypto");
 const cloudinary = require("cloudinary").v2;
+const { sendEmail } = require("../services/emailService");
+const Event = require("../models/Event");
+const Registration = require("../models/Registration");
 
 // Configure Cloudinary
 cloudinary.config({
@@ -13,15 +14,6 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// We'll pass the models from the main app
-let Event, Registration;
-
-// Initialize models
-const initModels = (models) => {
-  Event = models.Event;
-  Registration = models.Registration;
-};
-
 // Generate a unique transaction reference
 const generateTransactionRef = () => {
   return `YM${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 10000)}`;
@@ -29,18 +21,7 @@ const generateTransactionRef = () => {
 
 // Create UPI payment
 router.post("/create-payment", async (req, res) => {
-  console.log("UPI payment creation request received");
   const { eventId, name, email, phone, customFieldValues } = req.body;
-  
-  // Debug log
-  console.log("UPI payment data:", { 
-    eventId, 
-    name, 
-    email, 
-    phone, 
-    hasCustomFields: !!customFieldValues,
-    customFieldValues: JSON.stringify(customFieldValues)
-  });
 
   try {
     // Validate inputs
@@ -238,7 +219,6 @@ router.post("/check-payment-status", async (req, res) => {
 
 // Verify payment
 router.post("/verify-payment", async (req, res) => {
-  console.log("Verify payment request received");
   const { transactionRef, email, upiTransactionId, paymentScreenshot, registrationData } = req.body;
   
   // console.log("Registration data received:", {
@@ -292,8 +272,6 @@ router.post("/verify-payment", async (req, res) => {
       try {
         // Get custom field values from registration data
         let customFields = registrationData.customFieldValues || {};
-        console.log("Custom field values type:", typeof customFields);
-        console.log("Custom field values:", JSON.stringify(customFields, null, 2));
         
         // Convert to object if it's a string (JSON)
         if (typeof customFields === 'string') {
@@ -319,29 +297,18 @@ router.post("/verify-payment", async (req, res) => {
         
         // Process the custom fields
         if (typeof customFields === 'object' && !Array.isArray(customFields)) {
-          console.log("Processing custom fields object with keys:", Object.keys(customFields));
-          
           Object.entries(customFields).forEach(([key, value]) => {
             if (value !== null && value !== undefined) {
               // Don't sanitize the key - keep it exactly as in the event definition
               customFieldsMap.set(key, value);
-              console.log(`Setting custom field: ${key} = ${JSON.stringify(value)}`);
             }
           });
-          
-          console.log("Final custom fields map size:", customFieldsMap.size);
-          console.log("Final custom fields map keys:", Array.from(customFieldsMap.keys()));
         } else {
-          console.warn("Custom fields is not a valid object:", typeof customFields, Array.isArray(customFields));
+          customFieldsMap.set("Note", "Custom field values format not recognized");
         }
         
         // Set the custom field values as a Map
         registration.customFieldValues = customFieldsMap;
-        
-        console.log("Created registration with custom fields:", JSON.stringify({
-          name: registration.name,
-          customFields: Array.from(registration.customFieldValues.entries())
-        }));
       } catch (customFieldError) {
         console.error("Error processing custom fields:", customFieldError);
         // Continue without custom fields if there's an error
@@ -364,8 +331,6 @@ router.post("/verify-payment", async (req, res) => {
 
     // Check if payment screenshot already exists
     if (registration.paymentScreenshot) {
-      console.log('Payment screenshot already exists for this registration:', registration.paymentScreenshot);
-      
       // Return success with existing screenshot URL and ticket ID
       return res.json({
         success: true,
@@ -449,20 +414,8 @@ router.post("/verify-payment", async (req, res) => {
     event.registeredUsers += 1;
     await event.save();
 
-    // Send confirmation email with ticket using event-specific email if available
+    // Send confirmation email with ticket using event-specific email if available (OAuth2)
     const emailUser = event.emailForNotifications || process.env.EMAIL_USER;
-    const emailPass = event.appPassword || process.env.EMAIL_PASS;
-    
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      secure: true,
-      socketTimeout: 10000,
-      connectionTimeout: 10000, 
-      auth: {
-        user: emailUser,
-        pass: emailPass,
-      },
-    });
 
     // Create ticket data for QR code
     const ticketData = {
@@ -582,18 +535,19 @@ router.post("/verify-payment", async (req, res) => {
       </div>
     `;
 
-    // Extract email username for the from field
-    const emailUsername = emailUser.split('@')[0];
-    const emailDomain = emailUser.split('@')[1];
-    
     let mailOptions = {
       from: `Yellowmatics.ai <${emailUser}>`,
       to: registration.email,
-      subject: `🔄 Payment Verification in Progress - ${event.name} | Ticket #${registration.ticketId}`,
+      subject: `Payment Verification in Progress - ${event.name} | Ticket #${registration.ticketId}`,
       html: emailContent
     };
 
-    await transporter.sendMail(mailOptions);
+    try {
+      await sendEmail(event, mailOptions);
+    } catch (emailError) {
+      console.error("Error sending payment verification email:", emailError);
+      // Continue even if email fails
+    }
 
     // Determine if this was a new screenshot or an existing one
     const isNewScreenshot = !registration.paymentScreenshot || registration.paymentScreenshot === screenshotUrl;
@@ -657,7 +611,4 @@ router.get("/payment-status/:transactionRef", async (req, res) => {
   }
 });
 
-module.exports = {
-  router,
-  initModels,
-};
+module.exports = router;
